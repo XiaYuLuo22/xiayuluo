@@ -372,6 +372,34 @@ def test_browser_codex_chat_selector_confirmation_and_no_api(page, browser_app):
     assert not app.state.model_requests
 
 
+def test_download_update_button_works_without_public_manifest(page):
+    page.route('**/api/updates', lambda route: route.fulfill(status=409,
+        content_type='application/json', body=json.dumps({'detail': '更新源尚未发布或仓库需要登录；请点击下载更新。'})))
+    requests = []
+    def download_page(route):
+        requests.append(route.request)
+        route.fulfill(status=200, content_type='text/html', body='<p>登录 GitHub 下载构建产物</p>')
+    page.context.route('https://github.com/XiaYuLuo22/xiayuluo/actions/workflows/windows-app.yml', download_page)
+    original = page.url
+    page.locator('[data-view="settings"]').click()
+    button = page.get_by_role('button', name='↓ 下载更新', exact=True)
+    playwright_api.expect(button).to_be_visible()
+    page.locator('#check-update').click()
+    playwright_api.expect(page.locator('#update-status')).to_contain_text('需要登录')
+    playwright_api.expect(button).to_be_visible()
+    with page.expect_popup() as opening:
+        button.click()
+    popup = opening.value
+    popup.wait_for_load_state()
+    assert popup.url == 'https://github.com/XiaYuLuo22/xiayuluo/actions/workflows/windows-app.yml'
+    assert page.url == original
+    assert requests and 'x-assistant-token' not in requests[0].headers
+    assert 'referer' not in requests[0].headers
+    playwright_api.expect(page.locator('#update-status')).to_contain_text('不代表更新已安装')
+    playwright_api.expect(page.locator('#install-update')).to_be_hidden()
+    popup.close()
+
+
 def test_browser_devices_and_remote_task_confirmation(page, browser_app):
     _, app = browser_app
     page.locator('[data-view="devices"]').click()

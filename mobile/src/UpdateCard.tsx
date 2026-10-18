@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
-import { Alert, Platform, Pressable, Text, View } from 'react-native';
+import { Alert, Linking, Platform, Pressable, Text, View } from 'react-native';
 import { checkUpdate, currentVersion, installUpdate } from './updates';
 import type { Release } from './updateProtocol';
+import config from './update-config.json';
+import { downloadPage } from './downloadLinks';
 
 export function UpdateCard({ disabled }: { disabled: boolean }) {
   const [release, setRelease] = useState<Release | null>(null);
@@ -28,10 +30,22 @@ export function UpdateCard({ disabled }: { disabled: boolean }) {
       } },
     ]);
   }
+  async function download() {
+    if (busy || disabled) return;
+    if (Platform.OS !== 'android') { setMessage('目前仅有安卓安装包，尚未提供 iOS 安装包。'); return; }
+    if (release) { install(); return; }
+    setBusy(true);
+    try {
+      await Linking.openURL(downloadPage(config.repository, 'android'));
+      setMessage('已请求打开 GitHub 下载页。私有仓库请登录后选择安卓 APK；若尚无安装包，需先完成发布。下载后由系统确认覆盖安装，不要卸载旧版。这不表示已经更新成功。');
+    } catch { setMessage('无法打开下载页，请检查系统浏览器和网络后重试。'); }
+    finally { setBusy(false); }
+  }
   return <View style={{ borderWidth: 1, borderColor: '#e2e9db', borderRadius: 15, padding: 18, marginBottom: 14 }}>
     <Text style={{ color: '#4a6340', fontSize: 16 }}>版本与更新</Text>
     <Text accessibilityLiveRegion="polite" style={{ color: '#738267', marginVertical: 12, lineHeight: 22 }}>{message}</Text>
     <Pressable accessibilityRole="button" disabled={busy} onPress={() => void check()} style={{ paddingVertical: 12 }}><Text style={{ color: '#46895f' }}>{busy ? '正在处理…' : '检查更新'}</Text></Pressable>
-    {!!release && Platform.OS === 'android' && <Pressable accessibilityRole="button" disabled={busy || disabled} onPress={install} style={{ paddingVertical: 12 }}><Text style={{ color: '#46895f' }}>下载并安装更新</Text></Pressable>}
+    <Pressable accessibilityRole="button" accessibilityLabel="下载更新" disabled={busy || disabled} onPress={() => void download()} style={{ padding: 13, backgroundColor: busy || disabled ? '#95ad9a' : '#46895f', borderRadius: 10, alignItems: 'center' }}><Text style={{ color: '#fff' }}>下载更新</Text></Pressable>
+    <Text style={{ color: '#738267', marginTop: 10, fontSize: 12, lineHeight: 20 }}>无需先检查即可打开私有下载页。若已检测到签名新版本，则下载校验后交由系统确认安装。打开页面不等于安装成功。</Text>
   </View>;
 }

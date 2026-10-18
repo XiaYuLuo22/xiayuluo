@@ -16,7 +16,7 @@ export async function checkUpdate(): Promise<{ release: Release; available: bool
   try {
     // This request is independent of the paired computer, and never carries its token.
     const response = await fetch(config.manifest_url, { signal: abort.signal, credentials: 'omit' });
-    if (response.status === 404) throw new Error('更新源尚未发布正式版本。');
+    if (response.status === 404) throw new Error('更新源尚未发布或仓库需要登录。可点击“下载更新”前往 GitHub。');
     if (!response.ok || !response.body) throw new Error('更新检查失败，请稍后重试。');
     const reader = response.body.getReader(), decoder = new TextDecoder();
     let text = '', size = 0;

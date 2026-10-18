@@ -56,7 +56,7 @@
 
 ## 手机开发与构建
 
-0.1.2 电脑服务支持无 API 密钥的 Codex 日常问答（CODEX_CHAT.md），现有手机聊天协议兼容，仍需电脑确认后执行并同步结果。本次源码版本与下次 Android versionCode 已递增，但现有下载 APK 仍是下方已核验的 0.1.1，不声称已构建 0.1.2 APK。
+0.1.2 电脑服务支持无 API 密钥的 Codex 日常问答（CODEX_CHAT.md），现有手机聊天协议兼容，仍需电脑确认后执行并同步结果。0.1.3 安卓 APK 已构建，在「设备 → 版本与更新」新增始终可见的「下载更新」按钮；私有仓库在系统浏览器登录手动下载，不内置 GitHub token，详见 UPDATES.md。
 
 依赖版本来自 Expo 58.0.14 官方 `bundledNativeModules.json`，并锁在 `mobile/package-lock.json`（包含 npm integrity）。需要 Node.js 22+；iOS 原生构建需要 macOS/Xcode，Android 安装包需要对应 Android 构建工具，或者你主动选择的 EAS 构建账号。
 
@@ -80,11 +80,11 @@ npm start
 
 已准备 Android SDK 37.0、Build Tools 37、NDK 27.1、CMake 3.22.1、Gradle 9.4.1、JDK 21 和 JDK 17；官方来源与校验记录见 `tools/android-toolchain.lock.json`。构建脚本 `tools/build_android.py` 使用独立私钥而非公共 debug key，内嵌 JS，并在分发前验证 APK 签名、内嵌 JS 和不含私有配置/数据库。私钥与口令保留在本地 `.android-signing`，不进入源码包或 APK，不要删除或输出它们。
 
-当前已生成 `/tmp/xiayuluo-0.1.1-android-arm64.apk`（23,466,248 字节），手机便于下载的安装 ZIP 为 `/tmp/xiayuluo-0.1.1-android-arm64-install.zip`（10,146,994 字节）。此前 `repo.reactnative.dev` 的 403 阻塞通过环境设置放行解决；本次真实 Gradle release 构建成功（313 个任务），未关闭 TLS/校验或使用公共 debug 签名。
+当前已生成 `/tmp/xiayuluo-0.1.3-android-arm64.apk`（23,468,996 字节），手机便于下载的安装 ZIP 为 `/tmp/xiayuluo-0.1.3-android-arm64-install.zip`（10,148,465 字节）。此前 `repo.reactnative.dev` 的 403 阻塞通过环境设置放行解决；本次真实 Gradle release 构建成功（313 个任务），未关闭 TLS/校验或使用公共 debug 签名。
 
-已验证 APK Signature Scheme v2、与 0.1.0 相同的独立签名证书、ZIP CRC、16KB zipalign、内嵌 Hermes JS（1,542,064 字节）及 577 份许可资源；包名 `com.xiayuluo.assistant`，版本 0.1.1 / 2，最低 API 24，目标 API 36，架构 `arm64-v8a`，未启用 debuggable，关闭系统备份。新增 `REQUEST_INSTALL_PACKAGES` 用于用户确认的系统更新；Application 依赖包含正常级别的 Install Referrer 服务权限，但本 App 不调用其渠道查询 API。没有相机、麦克风、悬浮窗和外部存储权限；安全存储依赖声明生物识别/指纹权限，当前未开启生物识别认证。分发包不含 `.env`、密钥库、发布私钥和聊天/设备数据库。更新源尚未发布、未真机覆盖升级，见 UPDATES.md。
+已验证 APK Signature Scheme v2、与 0.1.0 相同的独立签名证书、ZIP CRC、16KB zipalign、内嵌 Hermes JS（1,544,808 字节）及许可资源；包名 `com.xiayuluo.assistant`，版本 0.1.3 / 4，最低 API 24，目标 API 36，架构 `arm64-v8a`，未启用 debuggable，关闭系统备份。`REQUEST_INSTALL_PACKAGES` 用于用户确认的系统更新；Application 依赖包含正常级别的 Install Referrer 服务权限，但本 App 不调用其渠道查询 API。没有相机、麦克风、悬浮窗和外部存储权限；安全存储依赖声明生物识别/指纹权限，当前未开启生物识别认证。分发包不含 `.env`、密钥库、发布私钥和聊天/设备数据库。更新源尚未发布、未真机覆盖升级，见 UPDATES.md。
 
-当前 APK SHA-256：`accae704b96f622f401d63601fdd01c08afb5332705240846c4eaec5ca965ce7`。独立签名证书 SHA-256：`bef9a3315531035f91362a72fd3012198304fd83d21d07009d67fd1df90ac96a`。这是公开校验信息，不是私钥。旧 0.1.0 的 APK 校验值为 `27f7b095a44517bd97f68046eec57ceb091d0fa339b4366ae0cb61ae74b3a995`；它没有 App 内更新入口，需先手动覆盖升级一次。安装与配对见 `ANDROID_INSTALL.md`。
+当前 APK SHA-256：`4e84f872a06c6acfe2925f418886f182f54ca1153c8ad26af3374541f0246598`。独立签名证书 SHA-256：`bef9a3315531035f91362a72fd3012198304fd83d21d07009d67fd1df90ac96a`。这是公开校验信息，不是私钥。旧 0.1.0 的 APK 校验值为 `27f7b095a44517bd97f68046eec57ceb091d0fa339b4366ae0cb61ae74b3a995`；它没有 App 内更新入口，需先手动覆盖升级一次。安装与配对见 `ANDROID_INSTALL.md`。
 
 本地 Linux 构建的基本步骤（要求工具链已经安装）：
 

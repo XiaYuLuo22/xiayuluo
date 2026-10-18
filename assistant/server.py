@@ -170,10 +170,17 @@ def create_app(settings=None, *, memory=None, transport=None):
             return {**result, "install_supported": app.state.install_update is not None}
         except httpx.HTTPStatusError as error:
             if error.response.status_code == 404:
-                raise HTTPException(409, "更新源尚未发布可下载的正式版本。") from error
+                raise HTTPException(409, "更新源尚未发布或仓库需要登录；请点击“下载更新”前往 GitHub。") from error
             raise HTTPException(502, "暂时无法访问更新发布源，请稍后重试。") from error
         except httpx.HTTPError as error:
             raise HTTPException(502, "更新检查网络失败，请稍后重试；当前版本不受影响。") from error
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
+
+    @app.get("/api/updates/downloads", dependencies=auth)
+    async def update_download_pages():
+        try:
+            return updater.downloads()
         except ValueError as error:
             raise HTTPException(409, str(error)) from error
 

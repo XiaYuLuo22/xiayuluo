@@ -52,6 +52,17 @@ const json = async (path, options) => (await api(path, options)).json();
 const post = (path, body = {}) => json(path, { method: 'POST', body: JSON.stringify(body) });
 
 let updateBusy = false;
+async function loadUpdateDownloads() {
+  try {
+    const info = await json('/api/updates/downloads');
+    const url = new URL(info.windows_url);
+    if (url.origin !== 'https://github.com' || url.username || url.password || url.search || url.hash) throw new Error('下载地址配置无效。');
+    $('#download-update').href = url.href;
+  } catch { /* Keep the pinned GitHub fallback available without a successful update check. */ }
+}
+$('#download-update').addEventListener('click', () => {
+  $('#update-status').textContent = '已请求在系统浏览器打开 GitHub 下载页；私有仓库需登录。请选择成功构建下载，打开页面不代表更新已安装。';
+});
 $('#check-update').addEventListener('click', async () => {
   if (updateBusy) return;
   updateBusy = true; $('#check-update').disabled = true; $('#install-update').hidden = true;
@@ -594,5 +605,6 @@ $('#plugin-form').addEventListener('submit', guarded(async (event) => {
 }));
 guarded(async () => {
   const bootstrap = await (await fetch('/api/bootstrap')).json(); state.token = bootstrap.token;
+  void loadUpdateDownloads();
   await refreshStatus(); const sessions = await refreshSessions(); if (sessions.length) await loadSession(sessions[0].id);
 })();

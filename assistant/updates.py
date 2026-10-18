@@ -21,6 +21,14 @@ MAX_DOWNLOAD = 512 * 1024 * 1024
 CONFIG = Path(__file__).with_name("update-config.json")
 
 
+def download_pages(repository):
+    if (not isinstance(repository, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}", repository)
+            or repository.rsplit("/", 1)[-1] in {".", ".."}):
+        raise ValueError("下载仓库配置无效。")
+    root = f"https://github.com/{repository}"
+    return {"windows_url": root + "/actions/workflows/windows-app.yml", "android_url": root + "/releases"}
+
+
 def version(value):
     if not isinstance(value, str) or not re.fullmatch(r"(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})", value):
         raise ValueError("更新版本号无效。")
@@ -177,6 +185,11 @@ class Updates:
         self.config = config or json.loads(CONFIG.read_text(encoding="utf-8"))
         self.cache = Path(cache)
         self.lock = Lock()
+
+    def downloads(self):
+        return {"current": __version__, "mode": "browser-download",
+                **download_pages(self.config["repository"]),
+                "message": "私有仓库需在系统浏览器登录 GitHub。只有成功构建/已发布的安装包才能下载；打开页面不等于安装完成。"}
 
     def check(self):
         trusted_url(self.config["manifest_url"], self.config["repository"])

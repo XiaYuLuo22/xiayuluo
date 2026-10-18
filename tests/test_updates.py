@@ -11,7 +11,7 @@ import pytest
 from assistant import __version__
 from assistant.update_worker import swap_install
 from assistant.desktop_app import update_location_safe
-from assistant.updates import Updates, extract_windows, fetch_bytes, trusted_url, verify_manifest, version
+from assistant.updates import Updates, download_pages, extract_windows, fetch_bytes, trusted_url, verify_manifest, version
 
 
 @pytest.fixture
@@ -205,11 +205,33 @@ def test_no_release_is_not_reported_as_up_to_date(client_factory, monkeypatch):
     result = client.get('/api/updates')
     assert result.status_code == 409
     assert '尚未发布' in result.json()['detail']
+    assert '下载更新' in result.json()['detail']
 
 
 def test_release_versions_and_pinned_configs_match():
     from tools.release import verify_versions
-    assert verify_versions(__version__) == 3
+    assert verify_versions(__version__) == 4
+
+
+def test_private_download_pages_do_not_need_network_and_require_local_token(client_factory, monkeypatch):
+    client, _ = client_factory()
+    def no_network(*args, **kwargs):
+        raise AssertionError('Download links must not fetch private artifacts anonymously')
+    monkeypatch.setattr('assistant.updates.fetch_bytes', no_network)
+    assert client.get('/api/updates/downloads', headers={'X-Assistant-Token': ''}).status_code == 403
+    info = client.get('/api/updates/downloads').json()
+    assert info['mode'] == 'browser-download'
+    assert info['windows_url'] == 'https://github.com/XiaYuLuo22/xiayuluo/actions/workflows/windows-app.yml'
+    assert info['android_url'] == 'https://github.com/XiaYuLuo22/xiayuluo/releases'
+    assert '登录 GitHub' in info['message']
+    assert 'token=' not in json.dumps(info)
+
+
+@pytest.mark.parametrize('repository', ['../other', 'owner/..', 'owner/.', 'owner/repo?token=secret',
+    'https://evil.example/repo', 'owner/repo/extra', 'owner/repo#fragment', 'owner/repo\\other'])
+def test_manual_download_repository_validation(repository):
+    with pytest.raises(ValueError):
+        download_pages(repository)
 
 
 def test_install_cannot_replace_config_data_or_codex_workspace(tmp_path):
