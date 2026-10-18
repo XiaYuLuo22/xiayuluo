@@ -400,6 +400,36 @@ def test_download_update_button_works_without_public_manifest(page):
     popup.close()
 
 
+def test_voice_opt_in_start_stop_controls(page):
+    requests = []
+    running = [False]
+    def voice_status(route):
+        route.fulfill(content_type='application/json', body=json.dumps({'available': True,
+            'running': running[0], 'message': '正在本地监听' if running[0] else '语音未开启'}))
+    def voice_start(route):
+        requests.append(route.request.post_data_json)
+        running[0] = True
+        route.fulfill(content_type='application/json', body='{}')
+    def voice_stop(route):
+        running[0] = False
+        route.fulfill(content_type='application/json', body='{"stopped":true}')
+    page.route('**/api/voice', voice_status)
+    page.route('**/api/voice/start', voice_start)
+    page.route('**/api/voice/stop', voice_stop)
+    page.locator('[data-view="settings"]').click()
+    start = page.locator('#voice-start')
+    playwright_api.expect(start).to_be_enabled(timeout=6000)
+    page.once('dialog', lambda dialog: dialog.dismiss())
+    start.click()
+    assert not requests
+    page.once('dialog', lambda dialog: dialog.accept())
+    start.click()
+    playwright_api.expect(page.locator('#voice-status')).to_contain_text('正在本地监听')
+    assert requests == [{'confirm': True}]
+    page.locator('#voice-stop').click()
+    playwright_api.expect(page.locator('#voice-status')).to_contain_text('语音未开启')
+
+
 def test_browser_devices_and_remote_task_confirmation(page, browser_app):
     _, app = browser_app
     page.locator('[data-view="devices"]').click()

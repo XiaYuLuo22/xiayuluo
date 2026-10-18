@@ -6,7 +6,12 @@ if not exist ".venv\Scripts\python.exe" (
   popd
   exit /b 1
 )
-".venv\Scripts\python.exe" -m pip install -c requirements.lock -e ".[app,desktop,build]"
+".venv\Scripts\python.exe" -m pip install -c requirements.lock -e ".[app,desktop,voice,build]"
+if errorlevel 1 (
+  popd
+  exit /b 1
+)
+".venv\Scripts\python.exe" tools\prepare_voice_model.py
 if errorlevel 1 (
   popd
   exit /b 1

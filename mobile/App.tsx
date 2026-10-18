@@ -4,6 +4,7 @@ import { Alert, AppState, FlatList, KeyboardAvoidingView, Modal, Platform, Press
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { UpdateCard } from './src/UpdateCard';
+import { VoiceCard, stopVoice } from './src/VoiceCard';
 import { Client, loadConnection, pairDevice, saveConnection, type Action, type Connection,
   type Memory, type Message, type Session } from './src/client';
 
@@ -84,6 +85,7 @@ function Home() {
   async function disconnect() {
     if (busy) return;
     try {
+      await stopVoice();
       await saveConnection(null); setConnection(null); setOnline(false); setSelected(null);
       setMessages([]); setSessions([]); setMemories([]); setTasks([]); setDraft(''); setMemoryDraft('');
       setNotice('已移除此手机的本地凭据。要彻底撤销访问，请同时在电脑设备页撤销设备。');
@@ -173,6 +175,7 @@ function Home() {
       <Text style={s.eyebrow}>YOUR DEVICES</Text><Text style={s.title}>随身聊，接着做</Text>
       <Text style={s.description}>手机、电脑、开发者模式，共用同一份对话与四级记忆。仅与你主动配对的电脑连接。</Text>
       <UpdateCard disabled={busy} />
+      <VoiceCard connection={connection} disabled={busy} onSession={id => { if (!busy) { setSelected(id); setMessages([]); setTab('chat'); } }} />
       {connection ? <View style={s.card}><Text style={s.cardText}>{connection.name}</Text><Text selectable style={s.hint}>{connection.url}</Text>
         <Text style={s.hint}>凭据保存在系统安全存储，不同步模型密钥。解除本机配对不会删除电脑数据。</Text>
         <Button label="解除本机配对" disabled={busy} onPress={() => Alert.alert('解除配对？', '清除此手机凭据。电脑中可另行撤销访问权限。', [{ text: '取消' }, { text: '解除', style: 'destructive', onPress: () => void disconnect() }])} /></View> : <View style={s.card}>

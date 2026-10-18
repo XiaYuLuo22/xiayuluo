@@ -16,17 +16,20 @@ class PairRequest(BaseModel):
 
 
 class Forward(Response):
-    def __init__(self, core, token, path, body=None):
+    def __init__(self, core, token, path, body=None, device_id=None):
         self.core, self.token, self.path, self.request_body = core, token, path, body
+        self.device_id = device_id
         super().__init__()
 
     async def __call__(self, scope, receive, send):
         forwarded = dict(scope)
         forwarded.update(path=self.path, raw_path=self.path.encode(), root_path="")
         # Never pass phone Authorization through to the model, logs, or core debug token.
-        excluded = {b"authorization", b"x-assistant-token", b"origin", b"host"}
+        excluded = {b"authorization", b"x-assistant-token", b"origin", b"host", b"x-xiayuluo-voice-device"}
         forwarded["headers"] = [(key, value) for key, value in scope["headers"] if key.lower() not in excluded]
         forwarded["headers"] += [(b"host", b"localhost"), (b"x-assistant-token", self.token.encode())]
+        if self.device_id:
+            forwarded["headers"].append((b"x-xiayuluo-voice-device", ("phone:" + self.device_id).encode()))
         consumed = False
         async def replay():
             nonlocal consumed
@@ -69,7 +72,7 @@ def gateway(core, devices, token):
         if not device:
             raise HTTPException(401, "设备未配对、已撤销或凭据已过期。")
         allowed = {"GET": r"(?:sessions(?:/[a-f0-9]{32})?|memories|status|actions)",
-                   "POST": r"(?:sessions|chat|memories)"}
+                   "POST": r"(?:sessions|chat|memories|voice/(?:sessions|heartbeat|revoke))"}
         if not re.fullmatch(allowed.get(request.method, r"(?!)"), path):
             raise HTTPException(403, "手机无权执行此操作，请在电脑端确认。")
         if path == "status":
@@ -85,7 +88,7 @@ def gateway(core, devices, token):
                 raise HTTPException(422, "消息格式不正确。") from error
             if not isinstance(data, dict) or data.get("screenshot_id") is not None:
                 raise HTTPException(403, "手机不能读取或转发电脑截图。请在电脑端主动附图。")
-        return Forward(core, token, "/api/" + path, body)
+        return Forward(core, token, "/api/" + path, body, device_id=device["id"])
 
     return app
 

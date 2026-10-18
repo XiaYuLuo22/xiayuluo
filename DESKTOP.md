@@ -6,6 +6,8 @@
 
 ## 从源码直接启动
 
+0.1.4 语音测试功能需要另外安装 `.[app,desktop,voice]`、准备官方中文离线模型并具备系统中文 SAPI 声音；普通 `start.cmd` 的文字聊天不强制下载模型。模型已在云端获取并校验，未完成 Windows 麦克风验收；Windows 安装包仍须在 Windows 构建，不能把源码通过当成 EXE 已验收。设置页会明确显示不可用原因，见 [VOICE.md](VOICE.md)。
+
 日常问答可以使用官方 Codex CLI 的 ChatGPT 登录，不需要模型 API 密钥或项目目录；需要支持安全开关的新版 CLI，发送前逐次确认。仅装 Codex 桌面 App 不代表 CLI 已可用，完整步骤见 [CODEX_CHAT.md](CODEX_CHAT.md)。编程模式仍需项目目录。
 
 需要 Windows 10/11、Python 3.11+ 和 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。许多 Windows 电脑已有此运行库。需要 Codex 时另外安装 Node.js 22+ 和 Codex CLI。
@@ -37,7 +39,8 @@ py -3 -m venv .venv
 也可分步运行：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -c requirements.lock -e ".[app,desktop,build]"
+.\.venv\Scripts\python.exe -m pip install -c requirements.lock -e ".[app,desktop,voice,build]"
+.\.venv\Scripts\python.exe tools\prepare_voice_model.py
 .\.venv\Scripts\python.exe tools\build_desktop.py
 ```
 

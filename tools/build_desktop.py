@@ -17,9 +17,12 @@ def build_command(output, work):
         "--workpath", str(work / "work"), "--specpath", str(work / "spec"),
         "--paths", str(ROOT), "--collect-all", "webview", "--collect-all", "pythonnet",
         "--collect-all", "clr_loader", "--hidden-import", "clr", "--collect-submodules", "uvicorn",
+        "--collect-all", "vosk", "--collect-all", "sounddevice", "--collect-all", "_sounddevice_data",
+        "--collect-all", "pyttsx3", "--collect-all", "comtypes", "--hidden-import", "pyttsx3.drivers.sapi5", "--hidden-import", "pythoncom",
         "--collect-submodules", "assistant", "--hidden-import", "webview.platforms.edgechromium",
         "--add-data", f"{ROOT / 'assistant/static'}:assistant/static",
         "--add-data", f"{ROOT / 'assistant/update-config.json'}:assistant",
+        "--add-data", f"{ROOT / 'assistant/voice-model'}:assistant/voice-model",
         "--add-data", f"{ROOT / '.env.example'}:.",
         "--add-data", f"{ROOT / 'THIRD_PARTY_NOTICES.md'}:.", str(ROOT / "tools/desktop_entry.py")]
 
@@ -56,6 +59,8 @@ def main(argv=None):
         return 0
     if sys.platform != "win32":
         raise SystemExit("Windows .exe 必须在 Windows 上构建；Linux 不能交叉打包。可用 --dry-run 检查构建步骤。")
+    if not (ROOT / 'assistant/voice-model/am/final.mdl').is_file():
+        raise SystemExit("先运行 python tools/prepare_voice_model.py，不能把缺少离线模型的包当作语音版本分发。")
     app = output / "Xiayuluo"
     archive = output / "Xiayuluo-Windows.zip"
     if app.exists() or archive.exists():
@@ -71,6 +76,7 @@ def main(argv=None):
     if not (app / "Xiayuluo.exe").is_file() or not (app / "XiayuluoUpdater.exe").is_file():
         raise SystemExit("构建未生成 Xiayuluo.exe，不能标记为成功。")
     collect_licenses(app / "licenses")
+    shutil.copytree(ROOT / 'tools/licenses', app / 'licenses/voice', dirs_exist_ok=True)
     shutil.copy2(ROOT / "THIRD_PARTY_NOTICES.md", app / "THIRD_PARTY_NOTICES.md")
     shutil.copy2(ROOT / "DESKTOP.md", app / "DESKTOP.md")
     shutil.make_archive(str(output / "Xiayuluo-Windows"), "zip", root_dir=output, base_dir="Xiayuluo")

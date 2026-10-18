@@ -15,7 +15,15 @@ Python 依赖通过 `pyproject.toml` 和 `requirements.lock` 管理，包括 Fas
 
 桌面 App 使用 [pywebview](https://github.com/r0x0r/pywebview) 6.2.1（BSD-3-Clause）；Windows 使用系统 Microsoft WebView2 和 pythonnet 适配层。构建工具为 [PyInstaller](https://github.com/pyinstaller/pyinstaller) 6.22.3，其 GPL 许可附带允许分发所构建程序的特殊例外。构建脚本会收集已安装依赖的许可证到发行包 `licenses/`，并保留此说明。WebView2 Runtime 通过微软的系统安装方式提供，未随源码包复制或修改。
 
-## 手机 App 开发依赖
+## 离线语音（源码测试功能）
+
+采用官方 [Vosk API](https://github.com/alphacep/vosk-api)：Android Maven 0.3.75、Windows PyPI 0.3.45，Apache-2.0；Android 使用 [JNA](https://github.com/java-native-access/jna) 5.18.1（Apache-2.0 或 LGPL-2.1-or-later，本分发选择 Apache-2.0）。来源及已获取的 Android AAR 校验值在 `tools/voice-sources.json`。JNA 5.18.1 原始 LICENSE 与 AL2.0 保存在 tools/licenses/，随构建复制。R8 保留 JNA 反射和原生符号所需类，构建继续收集原始许可与 NOTICE。
+
+中文模型采用官方 `vosk-model-small-cn-0.22`，已在官方 `https://alphacephei.com/vosk/models` 目录核对 Apache-2.0 许可，并与官方 model-list.json 发布大小/MD5 比对，固定归档 SHA-256。Vosk 上游原始 Apache 许可保留在 `tools/licenses/vosk-COPYING`，随双端构建复制；模型自带 README 原样保留。构建准备工具保留 HTTPS/哈希验证，不把这些校验冒称上游数字签名。来源与验收见 VOICE.md 和 tools/voice-sources.json。
+
+Windows 可选 [python-sounddevice](https://github.com/spatialaudio/python-sounddevice) 0.5.6（MIT，调用 PortAudio）和 [pyttsx3](https://github.com/nateshmbhat/pyttsx3) 2.99（MPL-2.0，使用系统 SAPI）。Windows 原始许可由打包脚本从实际依赖中收集；系统声音不随源码复制。独立 JVM 状态机测试使用 Kotlin 2.2.10（Apache-2.0）与 JUnit 4.13.2（EPL-1.0），不把测试依赖打进 APK。
+
+## 手机 App 其余开发依赖
 
 更新模块使用 [cryptography](https://github.com/pyca/cryptography) 50.0.2（Apache-2.0 或 BSD-3-Clause）验证 Ed25519，间接依赖 CFFI 2.1.1（MIT）及 pycparser 3.11（BSD-3-Clause），版本锁在 `requirements.lock`，原始许可随 Windows 发行包收集。手机使用 [noble-curves](https://github.com/paulmillr/noble-curves) / [noble-hashes](https://github.com/paulmillr/noble-hashes) 2.4.0（MIT）作相同签名校验，并使用官方 Expo FileSystem 58.0.9、IntentLauncher 58.0.3、Application 58.1.2（MIT）下载/校验 APK、打开系统安装器及获取已安装版本；精确 npm 来源与 integrity 在锁文件中，原始许可随 APK 收集。
 

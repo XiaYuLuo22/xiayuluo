@@ -94,6 +94,10 @@ class LocalService:
                 if self.server.started:
                     try:
                         if client.get(self.url + "/").status_code == 200:
+                            from .voice import DesktopVoice
+                            # Owned loopback service only; never write its token to disk/logs.
+                            bootstrap = client.get(self.url + "/api/bootstrap").json()
+                            self.app.state.voice = DesktopVoice(self.url, bootstrap["token"])
                             return self
                     except httpx.HTTPError:
                         pass
@@ -105,6 +109,9 @@ class LocalService:
         with self.stop_lock:
             if self.stopped:
                 return
+            if self.app.state.voice:
+                self.app.state.voice.stop()
+            self.app.state.voice_consents.revoke_owner("desktop")
             self.server.should_exit = True
             if self.thread.is_alive():
                 self.thread.join(timeout=12)

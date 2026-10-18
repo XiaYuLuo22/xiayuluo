@@ -47,7 +47,9 @@ def test_missing_bundle_and_accidental_private_data_cannot_be_distributed(tmp_pa
             validate_bundle(apk(f'private-{index}.apk', ['assets/index.android.bundle', name]))
     with pytest.raises(ValueError, match='license'):
         validate_bundle(apk('unlicensed.apk', ['assets/index.android.bundle', 'AndroidManifest.xml']))
-    validate_bundle(apk('bundled.apk', ['assets/index.android.bundle', 'AndroidManifest.xml', 'assets/licenses/THIRD_PARTY_NOTICES.md']))
+    with pytest.raises(ValueError, match='model missing'):
+        validate_bundle(apk('no-voice-model.apk', ['assets/index.android.bundle', 'assets/licenses/THIRD_PARTY_NOTICES.md']))
+    validate_bundle(apk('bundled.apk', ['assets/index.android.bundle', 'AndroidManifest.xml', 'assets/licenses/THIRD_PARTY_NOTICES.md', 'assets/voice-model/am/final.mdl']))
 
 
 def test_installed_licenses_are_preserved_in_generated_assets(monkeypatch, tmp_path):

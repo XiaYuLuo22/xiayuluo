@@ -2,13 +2,17 @@
 
 ## 安装
 
-加入「下载更新」按钮的新版安装文件名为 `xiayuluo-0.1.3-android-arm64.apk`（versionCode 4）。适用于 64 位 ARM 安卓手机（`arm64-v8a`），最低 Android 7.0 / API 24；32 位手机和 x86 安卓设备不适用此版本。
+0.1.4 已加入原生麦克风前台服务与离线中文模型，原生 release 构建完成，尚未真机验收。需要覆盖安装新版、在「设备 → 语音唤醒」明确开启及授权麦克风/通知，并连接 0.1.4 电脑服务和已登录 ChatGPT 的官方 Codex CLI。旧 0.1.3 包没有语音模块，见 [VOICE.md](VOICE.md)。
+
+当前语音测试包为 `xiayuluo-0.1.4-android-arm64-voice.apk`（versionCode 5，77,696,618 字节，约 74.1 MiB）。适用于 64 位 ARM 安卓手机（`arm64-v8a`），最低 Android 7.0 / API 24；32 位手机和 x86 安卓设备不适用此版本。
 
 在手机上下载并打开 APK。若系统提示安装来源权限，只给你用于下载的浏览器或文件管理器授权，安装后可以关闭该权限。不需要关闭系统安全防护、解锁、Root 或注册应用商店账号。如系统安全扫描给出风险提示，请先查看具体原因，不要盲目跳过。
 
 App 的界面与 JavaScript 已内嵌，打开界面不需要 Expo Go 或 Metro 开发服务器。当前没有连接用户的真机，不代表已经在你的具体手机型号上验收。若提示不兼容或启动失败，请提供手机型号、Android 版本及错误截图，不要发送密钥。
 
-0.1.3 已完成 Gradle release 构建、APK v2 签名、ZIP 完整性和 16KB 对齐检查，签名证书与旧版一致；尚未真机安装/覆盖升级。APK SHA-256：`4e84f872a06c6acfe2925f418886f182f54ca1153c8ad26af3374541f0246598`。手机若提示远程文件过大无法预览，请下载 `xiayuluo-0.1.3-android-arm64-install.zip`（约 9.7 MiB），在文件管理器解压，再点击其中的 APK。
+0.1.4 已完成 Gradle release 构建、APK v2 签名、ZIP 完整性和 16KB 对齐检查；Vosk/JNA ARM64 原生库也检查了 ELF 16KB 对齐，签名证书与旧版一致，尚未真机安装/覆盖升级。APK SHA-256：`240bdddc213b785849f51cf89ffeb2439ef6a3b0d9a3972d7f0fdaa70f5bff8d`。离线模型及原始许可已内嵌，无需在手机额外下载模型。
+
+可下载的安装 ZIP 为 `xiayuluo-0.1.4-android-arm64-install.zip`（57,048,668 字节，约 54.4 MiB），解压后点击 APK。比旧包大是因为新增离线中文模型；若聊天 App 仍提示文件过大，可在电脑下载后传手机。上传到私有 Releases 需要本人明确允许；不得因此公开仓库或内置 GitHub token。
 
 ## 连接电脑
 

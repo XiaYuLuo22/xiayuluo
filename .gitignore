@@ -16,3 +16,7 @@ mobile/android/
 mobile/ios/
 .android-signing/
 .release-signing/
+assistant/voice-model/
+mobile/voice-model/
+mobile/native/.gradle/
+mobile/native/build/

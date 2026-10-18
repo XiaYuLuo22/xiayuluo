@@ -40,6 +40,9 @@ def include_licenses(root):
     target = root / "mobile/android/app/src/main/assets/licenses"
     target.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(root / "THIRD_PARTY_NOTICES.md", target / "THIRD_PARTY_NOTICES.md")
+    source_licenses = root / 'tools/licenses'
+    if source_licenses.is_dir():
+        shutil.copytree(source_licenses, target / 'voice', dirs_exist_ok=True)
     modules = root / "mobile/node_modules"
     for directory, _, files in os.walk(modules):
         for name in files:
@@ -89,6 +92,8 @@ def validate_bundle(apk):
             raise ValueError("Unexpected private data in APK; refusing distribution.")
         if "assets/licenses/THIRD_PARTY_NOTICES.md" not in names:
             raise ValueError("Third-party license notices are missing from APK.")
+        if "assets/voice-model/am/final.mdl" not in names:
+            raise ValueError("Offline Chinese voice model missing; do not distribute a nonfunctional voice build.")
 
 
 def main(argv=None):

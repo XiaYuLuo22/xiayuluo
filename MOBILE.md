@@ -2,6 +2,8 @@
 
 ## 当前交付与边界
 
+0.1.4（Android versionCode 5）新增原生麦克风前台服务、本地“夏鱼洛”唤醒、系统离线中文朗读及设备绑定的 Codex 只读语音授权。需要 Android 新权限 RECORD_AUDIO、FOREGROUND_SERVICE_MICROPHONE、POST_NOTIFICATIONS、WAKE_LOCK；默认不开启，不增加悬浮窗/无障碍。官方中文模型已下载并校验，原生 release 测试包已构建，最新文件与校验见 ANDROID_INSTALL.md；下方保留 0.1.3 包的历史构建记录。未真机验证前后台/锁屏唤醒，不能保证持续可用，见 [VOICE.md](VOICE.md)。
+
 手机端是 `mobile/` 中的 Expo / React Native App 源码，Android、iOS 共用界面与协议。不是把桌面网站当成手机安装包。当前“开发端”指同一电脑主机上的开发者模式；另一台独立开发电脑、公共云账号、跨主机数据库合并不是本次已经完成的功能。
 
 当前同步采用 **电脑主机模式**：三端访问同一服务、同一份 SQLite 会话与记忆，避免两份永久记忆互相覆盖。桌面窗口和开发者模式继续本机运行；手机通过一次性邀请配对后，经 HTTPS 连接该电脑。未开启同步的旧用户不受影响。
@@ -80,7 +82,7 @@ npm start
 
 已准备 Android SDK 37.0、Build Tools 37、NDK 27.1、CMake 3.22.1、Gradle 9.4.1、JDK 21 和 JDK 17；官方来源与校验记录见 `tools/android-toolchain.lock.json`。构建脚本 `tools/build_android.py` 使用独立私钥而非公共 debug key，内嵌 JS，并在分发前验证 APK 签名、内嵌 JS 和不含私有配置/数据库。私钥与口令保留在本地 `.android-signing`，不进入源码包或 APK，不要删除或输出它们。
 
-当前已生成 `/tmp/xiayuluo-0.1.3-android-arm64.apk`（23,468,996 字节），手机便于下载的安装 ZIP 为 `/tmp/xiayuluo-0.1.3-android-arm64-install.zip`（10,148,465 字节）。此前 `repo.reactnative.dev` 的 403 阻塞通过环境设置放行解决；本次真实 Gradle release 构建成功（313 个任务），未关闭 TLS/校验或使用公共 debug 签名。
+此前 0.1.3 已生成 `/tmp/xiayuluo-0.1.3-android-arm64.apk`（23,468,996 字节），安装 ZIP 为 `/tmp/xiayuluo-0.1.3-android-arm64-install.zip`（10,148,465 字节）。以下为该版本的历史记录，最新语音测试包见 ANDROID_INSTALL.md。此前 `repo.reactnative.dev` 的 403 阻塞通过环境设置放行解决；真实 Gradle release 构建成功（313 个任务），未关闭 TLS/校验或使用公共 debug 签名。
 
 已验证 APK Signature Scheme v2、与 0.1.0 相同的独立签名证书、ZIP CRC、16KB zipalign、内嵌 Hermes JS（1,544,808 字节）及许可资源；包名 `com.xiayuluo.assistant`，版本 0.1.3 / 4，最低 API 24，目标 API 36，架构 `arm64-v8a`，未启用 debuggable，关闭系统备份。`REQUEST_INSTALL_PACKAGES` 用于用户确认的系统更新；Application 依赖包含正常级别的 Install Referrer 服务权限，但本 App 不调用其渠道查询 API。没有相机、麦克风、悬浮窗和外部存储权限；安全存储依赖声明生物识别/指纹权限，当前未开启生物识别认证。分发包不含 `.env`、密钥库、发布私钥和聊天/设备数据库。更新源尚未发布、未真机覆盖升级，见 UPDATES.md。
 

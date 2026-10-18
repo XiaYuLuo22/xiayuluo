@@ -52,6 +52,27 @@ const json = async (path, options) => (await api(path, options)).json();
 const post = (path, body = {}) => json(path, { method: 'POST', body: JSON.stringify(body) });
 
 let updateBusy = false;
+let voiceSession = null;
+async function refreshVoice() {
+  try {
+    const info = await json('/api/voice');
+    $('#voice-status').textContent = `${info.message || ''} ${info.available ? '' : info.reason || ''}`;
+    $('#voice-start').disabled = !info.available || info.running;
+    $('#voice-stop').disabled = !info.running;
+    voiceSession = info.session_id || null;
+    $('#voice-session').hidden = !voiceSession;
+  } catch { $('#voice-status').textContent = '无法读取语音状态，请重新打开 App。'; }
+}
+$('#voice-start').addEventListener('click', guarded(async () => {
+  if (!confirm('开启本地麦克风持续监听“夏鱼洛”，并一次授权本次语音会话的 Codex 只读问答？\n最小化后仍运行，可能增加耗电；唤醒后的文字、近期上下文和相关记忆会发送到官方 Codex CLI，进入会话/记忆。不上传或保存环境录音，不使用付费 API。仅普通问答免逐轮确认；编程、鼠标和记忆操作仍需确认。停止监听即撤销，退出 App 即停止。')) return;
+  await post('/api/voice/start', { confirm: true }); await refreshVoice();
+}));
+$('#voice-stop').addEventListener('click', guarded(async () => {
+  await post('/api/voice/stop'); await refreshVoice();
+}));
+$('#voice-session').addEventListener('click', guarded(async () => {
+  if (voiceSession && !state.busy) { await refreshSessions(); await loadSession(voiceSession); await openView('chat'); }
+}));
 async function loadUpdateDownloads() {
   try {
     const info = await json('/api/updates/downloads');
@@ -606,5 +627,7 @@ $('#plugin-form').addEventListener('submit', guarded(async (event) => {
 guarded(async () => {
   const bootstrap = await (await fetch('/api/bootstrap')).json(); state.token = bootstrap.token;
   void loadUpdateDownloads();
+  void refreshVoice();
+  setInterval(() => void refreshVoice(), 3000);
   await refreshStatus(); const sessions = await refreshSessions(); if (sessions.length) await loadSession(sessions[0].id);
 })();

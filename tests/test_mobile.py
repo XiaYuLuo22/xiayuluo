@@ -85,9 +85,10 @@ def test_phone_cannot_read_secrets_or_approve_tasks(client_factory, tmp_path):
     session = client.post('/api/sessions').json()['id']
     action = client.post('/api/actions', json={'tool': 'remember', 'session_id': session,
                          'arguments': {'tier': 'permanent', 'content': '等待电脑确认'}}).json()
-    for path in ('bootstrap', 'devices', 'desktop/screenshot', 'status/../bootstrap', 'sessions/../bootstrap'):
+    for path in ('bootstrap', 'devices', 'voice', 'voice/start', 'voice/stop', 'desktop/screenshot', 'status/../bootstrap', 'sessions/../bootstrap'):
         assert client.get(base + '/' + path, headers=headers).status_code in (403, 404)
     assert client.post(base + f"/actions/{action['id']}/approve", headers=headers).status_code == 403
+    assert client.post(base + '/voice/start', headers=headers, json={'confirm': True}).status_code == 403
     assert client.delete(base + '/memories', headers=headers).status_code == 403
     assert client.post(base + '/chat', headers=headers, json={'session_id': session, 'message': '看截图',
                        'screenshot_id': 'fixture-screen'}).status_code == 403
