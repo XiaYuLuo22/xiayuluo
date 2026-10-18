@@ -4,6 +4,8 @@ Windows 优先的可扩展桌面 App：独立窗口、日常文字对话、逐�
 
 这是可运行的首版。语音、键盘输入、多屏幕控制和无人值守自动操作尚未实现。
 
+0.1.2 日常对话可使用官方 Codex CLI 的 ChatGPT 登录，不再强制填写模型 API 密钥。设置中选择「Codex · ChatGPT 登录」，按确认流程发送近期上下文和相关记忆；默认无 API 密钥时也会提出该问答请求。它不操控 Codex 桌面窗口、不提取令牌、不绕过会员额度，也不保证逐字输出，详见 [CODEX_CHAT.md](CODEX_CHAT.md)。
+
 0.1.1 起新增 App 内检查更新：Windows 发行版在设置中下载并重启升级，安卓在设备页下载并交给系统确认。保留原安装位置、配置和四级记忆，采用固定公钥签名和安装包哈希校验。旧包需手动升级一次；更新源尚未正式发布，源码版不能自动覆盖更新。详见 [UPDATES.md](UPDATES.md)。
 
 新增手机 App：`mobile/` 使用 Expo / React Native，Android、iOS 共用聊天、记忆、任务、设备界面。已构建并校验 Android ARM64 私人测试 APK，安装说明见 [ANDROID_INSTALL.md](ANDROID_INSTALL.md)；iOS 尚无 IPA，尚未真机验收，也没有已部署的公网同步服务。可选的电脑主机同步通过 HTTPS 与一次性配对共享会话和四级记忆，手机仅能提出电脑任务，批准和执行留在电脑端。同步默认关闭；设计、连接步骤和安全/构建限制见 [MOBILE.md](MOBILE.md)。
@@ -37,7 +39,7 @@ py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -c requirements.lock -e ".[app,desktop]"
 ```
 
-编辑 `.env`，填写自己的模型配置；密钥只存在本机，切勿提交到 Git：
+如果使用模型 API，再编辑 `.env` 填写下列连接配置；仅使用 Codex 登录问答无需填写 OPENAI_API_KEY，按 CODEX_CHAT.md 登录并选择 Codex 即可。密钥只存在本机，切勿提交到 Git：
 
 ```dotenv
 OPENAI_API_KEY=你的模型密钥

@@ -6,6 +6,8 @@
 
 ## 从源码直接启动
 
+日常问答可以使用官方 Codex CLI 的 ChatGPT 登录，不需要模型 API 密钥或项目目录；需要支持安全开关的新版 CLI，发送前逐次确认。仅装 Codex 桌面 App 不代表 CLI 已可用，完整步骤见 [CODEX_CHAT.md](CODEX_CHAT.md)。编程模式仍需项目目录。
+
 需要 Windows 10/11、Python 3.11+ 和 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。许多 Windows 电脑已有此运行库。需要 Codex 时另外安装 Node.js 22+ 和 Codex CLI。
 
 推荐：安装 Python 后，完整解压并双击 `start.cmd`，不用手动输入安装命令。脚本优先使用已有 `.venv`，其次尝试 Python Launcher 的 3.12、默认 Python 3 或 PATH 上的 Python；首次创建专用环境并安装锁定约束下的 `.[app,desktop]`。后续实际检查导入和依赖一致性；配置未变且检查通过时跳过下载。缺少依赖会重新安装，安装失败不启动 App，错误窗口保留。它不会覆盖 `.env`、删除记忆或自动安装 Codex。请勿同时打开多个安装窗口。
@@ -61,7 +63,7 @@ py -3 -m venv .venv
 
 原生菜单「夏鱼洛 → 打开配置目录」可定位配置，「打开日志目录」可定位日志。「重新加载界面」只刷新界面；修改 `.env` 后要**退出并重新启动 App**。
 
-首次配置示例：
+使用模型 API 时的配置示例（仅用 Codex 日常问答不需要这三个 OPENAI 字段）：
 
 ```dotenv
 OPENAI_API_KEY=你的模型密钥

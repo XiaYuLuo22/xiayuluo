@@ -55,7 +55,7 @@
         <div id="chat-scroll" class="chat-scroll">
           <div id="welcome" class="welcome">
             <div class="welcome-symbol" aria-hidden="true">✦</div>
-            <div class="boot-label developer-only"><span class="status-dot"></span> DEVELOPER MODE / v0.1.0</div>
+            <div class="boot-label developer-only"><span class="status-dot"></span> DEVELOPER MODE</div>
             <h2>你好，我是夏鱼洛</h2>
             <p>一起聊聊生活，也一起把事情做好。<br>今天有什么想法？</p>
             <div class="suggestions">
@@ -121,9 +121,11 @@
         <div class="page-heading"><div><div class="eyebrow">SETTINGS</div><h1>你的助手，你的设置</h1><p>查看连接状态，管理隐私，按需开启开发者模式。</p></div><button id="refresh-status" class="secondary-button">刷新状态</button></div>
         <div class="settings-card preference-card"><div><h2>开发者模式</h2><p>显示运行指标、事件日志、工具参数和检查面板。默认关闭。</p></div><label class="switch"><input id="developer-mode" type="checkbox" role="switch" aria-label="开发者模式"><span aria-hidden="true"></span></label></div>
         <div id="settings-status" class="settings-status"></div>
+        <div class="settings-card"><h2>日常对话来源</h2><label for="chat-provider">选择连接方式</label> <select id="chat-provider"><option value="auto">自动：遵循电脑默认配置</option><option value="codex">Codex · ChatGPT 登录，无需 API 密钥</option><option value="api">模型 API · 单独配置密钥</option></select><p>Codex 方式调用电脑上的官方 CLI，不控制 Codex 桌面窗口、不提取登录令牌。近期会话及相关记忆经你确认后发送；首版逐次确认，不保证逐字输出，仍受会员额度限制。手机请求需到电脑确认。</p><p>先安装官方 <code>npm install -g @openai/codex</code>，再执行 <code>codex login</code> 并选择 ChatGPT 登录。仅安装桌面 Codex App 不代表已安装 CLI。普通问答不需要 CODEX_WORKSPACE；编程模式仍需指定项目目录。</p></div>
         <div class="settings-card"><h2>版本与更新</h2><p id="update-status" role="status" aria-live="polite">点击检查已发布的新版本。更新需确认，不影响配置和四级记忆。</p><pre id="update-notes" hidden></pre><button id="check-update" class="secondary-button">检查更新</button> <button id="install-update" class="primary-button" hidden>下载并重启更新</button><p>仅 Windows 发行版支持应用内替换安装；源码版不会被自动覆盖。云端代码需要构建、签名并发布后才会成为更新。</p></div>
         <details class="settings-card developer-only"><summary>当前运行元数据</summary><pre id="runtime-json"></pre></details>
-        <details class="settings-card"><summary>连接模型与 Codex（首次使用）</summary><p>首版需在本机 .env 配置连接后重启 App。桌面原生菜单「夏鱼洛 → 打开配置目录」可找到此文件。模型密钥只写入本机，界面不会读取或展示它。</p><pre>OPENAI_API_KEY=你的密钥
+        <details class="settings-card"><summary>连接模型与 Codex（首次使用）</summary><p>Codex 登录问答无需模型 API 密钥；使用 API 时才需在本机 .env 配置连接并重启。桌面原生菜单「夏鱼洛 → 打开配置目录」可找到此文件。模型密钥只写入本机，界面不会读取或展示它。</p><pre>CHAT_PROVIDER=auto
+OPENAI_API_KEY=
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4.1-mini
 CODEX_WORKSPACE=C:/Users/you/projects/my-project

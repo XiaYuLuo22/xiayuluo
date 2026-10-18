@@ -7,6 +7,7 @@
 - 默认运行方式为 pywebview 桌面 App，独立窗口管理自己的本地服务；无图形云机使用 `python -m assistant --serve`。发行版数据保存在用户目录，不打包 `.env` 或记忆数据库。Windows `.exe` 必须在 Windows 构建和验收。
 - 0.1.1 新增签名清单更新：Windows 发行版设置页、Android 设备页明确确认后下载安装，源码版不得自动覆盖 checkout。发布配置、公钥和同一 Android 签名必须稳定；保留 `.release-signing/` 和 `.android-signing/`，不打包/提交私钥。版本与 Android versionCode 同步递增。更新源/Actions 未正式发布或未经真机覆盖升级，不声称已上线，详见 UPDATES.md。
 - 四级记忆的层级名称为：临时性、一级、二级、永久。不要把事实、经历、方法改成层级；永久记忆由用户明确确认。
+- 0.1.2 日常问答支持官方 Codex CLI 的 ChatGPT 登录，不是操控桌面 Codex 窗口。无 API 密钥时默认提出 codex_chat 确认请求，手机只可提出并在电脑确认。问答强制只读/独立临时目录及安全开关，不沿用项目写权限，不提取凭据，不回退付费 API；保留显式 API 选择及原编程工具。验收与 CLI 兼容边界见 CODEX_CHAT.md。
 - 有具体用途时可以下载、使用合适的 GitHub 开源库和插件。优先复用成熟组件，核对官方来源、版本和许可证，并保留来源记录及必要的许可文件。
 - 前端第三方组件通过 `tools/frontend-vendor.lock.json` 和 `tools/vendor_frontend.py` 管理；更新时保留 TLS、归档和文件完整性校验。
 - 每个工具和插件沿用“提出请求 → 用户确认 → 执行”的流程；新插件需要明确参数、权限和可用性检查。

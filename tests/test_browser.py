@@ -62,7 +62,9 @@ class SlowModelStream(httpx.AsyncByteStream):
 
 @pytest.fixture
 def browser_app(tmp_path):
+    model_requests = []
     def handler(request):
+        model_requests.append(request)
         prompt = json.loads(request.content)['messages'][-1]['content']
         parts = ['## 功能检查\n\n', MARKDOWN_SAMPLE[len('## 功能检查\n\n'):]] if '展示排版测试' in prompt else None
         return httpx.Response(200, stream=SlowModelStream(parts), headers={'Content-Type': 'text/event-stream'})
@@ -71,6 +73,8 @@ def browser_app(tmp_path):
     app.state.desktop.enabled = True
     app.state.desktop.driver = FakeDesktop()
     app.state.codex.command_prefix = lambda: [sys.executable, str(Path(__file__).parent / 'fake_codex.py')]
+    app.state.codex_chat.command_prefix = app.state.codex.command_prefix
+    app.state.model_requests = model_requests
     sock = socket.socket()
     sock.bind(('127.0.0.1', 0))
     port = sock.getsockname()[1]
@@ -336,15 +340,36 @@ def test_browser_first_use_connection_hint(page):
         response = route.fetch()
         status = response.json()
         status['model']['configured'] = False
+        status['model']['api_configured'] = False
+        status['model']['codex_chat_available'] = False
+        status['model']['provider'] = 'api'
         route.fulfill(response=response, json=status)
     page.route('**/api/status*', unconfigured)
     page.reload()
-    playwright_api.expect(page.locator('#model-status')).to_have_text('模型待配置')
+    playwright_api.expect(page.locator('#model-status')).to_have_text('API 待配置')
     page.locator('#connection-hint').click()
     playwright_api.expect(page.locator('#view-settings')).to_be_visible()
     playwright_api.expect(page.locator('#settings-status')).to_contain_text('尚未连接')
     page.locator('#view-settings details:not(.developer-only) summary').click()
-    playwright_api.expect(page.locator('#view-settings pre').last).to_contain_text('OPENAI_API_KEY=你的密钥')
+    playwright_api.expect(page.locator('#view-settings pre').last).to_contain_text('OPENAI_API_KEY=')
+
+
+def test_browser_codex_chat_selector_confirmation_and_no_api(page, browser_app):
+    _, app = browser_app
+    page.locator('[data-view="settings"]').click()
+    page.locator('#chat-provider').select_option('codex')
+    playwright_api.expect(page.locator('#model-status')).to_contain_text('Codex')
+    page.locator('[data-view="chat"]').click()
+    page.locator('#prompt').fill('使用会员问答')
+    page.locator('#send').click()
+    button = page.locator('#messages .action-card button').last
+    playwright_api.expect(button).to_be_visible()
+    assert not app.state.model_requests
+    button.click()
+    playwright_api.expect(page.locator('#action-description')).to_contain_text('ChatGPT 登录而非 API 密钥')
+    page.locator('#approve-action').click()
+    playwright_api.expect(page.locator('.message.assistant .message-body').last).to_contain_text('chat fixture: 使用会员问答')
+    assert not app.state.model_requests
 
 
 def test_browser_devices_and_remote_task_confirmation(page, browser_app):

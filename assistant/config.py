@@ -18,6 +18,7 @@ class Settings:
     port: int = 8765
     data_dir: str = ".assistant"
     mobile_enabled: bool = False
+    chat_provider: str = "auto"
 
     @classmethod
     def load(cls, env_file=None):
@@ -34,6 +35,7 @@ class Settings:
             port=int(os.getenv("ASSISTANT_PORT", "8765")),
             data_dir=os.getenv("ASSISTANT_DATA_DIR", ".assistant"),
             mobile_enabled=os.getenv("MOBILE_ENABLED", "false").lower() == "true",
+            chat_provider=os.getenv("CHAT_PROVIDER", "auto").strip().lower(),
         )
         url = urlsplit(settings.api_base)
         if url.scheme not in {"http", "https"} or not url.hostname or url.username:
@@ -42,6 +44,8 @@ class Settings:
             raise ValueError("远程模型接口必须使用 HTTPS。")
         if settings.codex_sandbox not in {"read-only", "workspace-write"}:
             raise ValueError("CODEX_SANDBOX 只能为 read-only 或 workspace-write。")
+        if settings.chat_provider not in {"auto", "api", "codex"}:
+            raise ValueError("CHAT_PROVIDER 只能为 auto、api 或 codex。")
         if not 1024 <= settings.port <= 65535:
             raise ValueError("ASSISTANT_PORT 必须在 1024–65535 之间。")
         return settings

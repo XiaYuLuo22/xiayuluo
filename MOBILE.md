@@ -56,6 +56,8 @@
 
 ## 手机开发与构建
 
+0.1.2 电脑服务支持无 API 密钥的 Codex 日常问答（CODEX_CHAT.md），现有手机聊天协议兼容，仍需电脑确认后执行并同步结果。本次源码版本与下次 Android versionCode 已递增，但现有下载 APK 仍是下方已核验的 0.1.1，不声称已构建 0.1.2 APK。
+
 依赖版本来自 Expo 58.0.14 官方 `bundledNativeModules.json`，并锁在 `mobile/package-lock.json`（包含 npm integrity）。需要 Node.js 22+；iOS 原生构建需要 macOS/Xcode，Android 安装包需要对应 Android 构建工具，或者你主动选择的 EAS 构建账号。
 
 ```powershell

@@ -4,7 +4,7 @@ const $ = (selector) => document.querySelector(selector);
 const debug = window.DebugConsole;
 const state = { token: '', status: null, session: null, mode: 'chat', busy: false, controller: null,
   screenshot: null, attachment: null, position: null, tier: 'first', action: null, plugin: null,
-  sessions: [], developer: false, historyStamp: '', syncing: false, syncFailed: false };
+  sessions: [], developer: false, historyStamp: '', syncing: false, syncFailed: false, provider: 'auto' };
 const levels = [
   { id: 'temporary', title: '临时性记忆', label: 'TEMPORARY', detail: '当前对话 · 闲置 2 小时', note: '重启后清空' },
   { id: 'first', title: '一级记忆', label: 'LEVEL 01', detail: '近期片段 · 7 天', note: '检索 3 次晋升二级' },
@@ -172,9 +172,11 @@ function message(role, content = '') {
 async function refreshStatus() {
   state.status = await json(`/api/status${state.session ? `?session_id=${encodeURIComponent(state.session)}` : ''}`);
   const status = state.status;
-  $('#model-status').textContent = status.model.configured ? `${status.model.name} · 已配置` : '模型待配置';
-  $('#model-dot').classList.toggle('off', !status.model.configured);
-  $('#connection-hint').hidden = status.model.configured;
+  const source = state.provider === 'auto' ? status.model.provider : state.provider;
+  const ready = source === 'codex' ? status.model.codex_chat_available : status.model.api_configured;
+  $('#model-status').textContent = ready ? (source === 'codex' ? 'Codex · 已找到 CLI，发送后确认' : `${status.model.api_name} · API 已配置`) : (source === 'codex' ? '请安装并登录官方 Codex CLI' : 'API 待配置');
+  $('#model-dot').classList.toggle('off', !ready);
+  $('#connection-hint').hidden = ready;
   $('#desktop-notice').textContent = status.desktop.available ? '本机桌面驱动可用。截图有效期为 2 分钟；点击确认前会校验目标区域。请勿在运行点击时移动窗口。' : status.desktop.reason;
   $('#desktop-notice').classList.toggle('ready', status.desktop.available);
   $('#capture-screen').disabled = !status.desktop.available;
@@ -303,7 +305,7 @@ async function sendMessage(event) {
   $('#prompt').value = ''; state.attachment = null; $('#screen-attachment').hidden = true;
   message('user', prompt + (attachment ? '\n[本轮附上主屏幕截图]' : ''));
   const target = message('assistant');
-  await consumeStream('/api/chat', { session_id: session, message: prompt, mode: state.mode, screenshot_id: attachment }, target);
+  await consumeStream('/api/chat', { session_id: session, message: prompt, mode: state.mode, provider: state.provider === 'auto' ? undefined : state.provider, screenshot_id: attachment }, target);
 }
 
 function actionSummary(action) {
@@ -324,6 +326,7 @@ async function showAction(action, button = null) {
   $('#action-title').textContent = `确认${action.title}`;
   $('#action-description').textContent = action.tool === 'codex_task'
     ? '确认后将调用本机 Codex。workspace-write 模式可能修改指定项目；CLI 登录与权限需在本机配置。'
+    : action.tool === 'codex_chat' ? '确认后发送以下近期会话及参考记忆给官方 Codex CLI。使用 ChatGPT 登录而非 API 密钥；独立临时目录、只读沙箱，禁用命令、插件及浏览器等入口。仍受会员额度限制，不保证逐字输出。'
     : action.tool === 'desktop_click' ? '确认后将在实际桌面执行一次点击。请先核实目标位置和当前屏幕。' : '确认后才会执行插件操作。';
   $('#action-details').textContent = actionSummary(action); $('#action-dialog').showModal();
 }
@@ -445,7 +448,9 @@ function renderPlugins() {
 }
 function renderSettings() {
   const status = state.status; $('#settings-status').replaceChildren();
-  [{ title: '对话模型', ready: status.model.configured, detail: status.model.configured ? `${status.model.name} · 配置已读取，连接以实际对话为准` : '尚未连接，请展开下方首次使用说明配置模型。' },
+  const source = state.provider === 'auto' ? status.model.provider : state.provider;
+  const sourceReady = source === 'codex' ? status.model.codex_chat_available : status.model.api_configured;
+  [{ title: '日常对话', ready: sourceReady, detail: sourceReady ? (source === 'codex' ? 'Codex · CLI 已找到，ChatGPT 登录与会员额度需实际调用验证；逐次确认。' : `${status.model.api_name} · API 配置存在，连接需实际调用验证。`) : '尚未连接，请选择 Codex 登录问答，或配置模型 API。' },
     { title: 'Codex CLI', ready: status.codex.available, detail: status.codex.available ? `${status.codex.workspace} · ${status.codex.sandbox} · ${status.codex.reason}` : status.codex.reason },
     { title: '桌面驱动', ready: status.desktop.available, detail: status.desktop.available ? '主屏幕截图与鼠标点击可用，需用户确认' : status.desktop.reason }].forEach((item) => {
     const row = el('div', 'connection-row'); const info = el('div'); info.append(el('strong', '', item.title), el('small', '', item.detail));
@@ -531,6 +536,17 @@ function setDeveloperMode(enabled, persist = false) {
 try { setDeveloperMode(localStorage.getItem('xiayuluo.developer-mode') === 'true'); }
 catch { setDeveloperMode(false); }
 $('#developer-mode').addEventListener('change', (event) => setDeveloperMode(event.target.checked, true));
+try {
+  const selected = localStorage.getItem('xiayuluo.chat-provider');
+  if (['auto', 'api', 'codex'].includes(selected)) state.provider = selected;
+} catch { /* Defaults work with private storage disabled. */ }
+$('#chat-provider').value = state.provider;
+$('#chat-provider').addEventListener('change', guarded(async event => {
+  if (state.busy) { $('#chat-provider').value = state.provider; return toast('请先完成当前回复。'); }
+  state.provider = event.target.value;
+  try { localStorage.setItem('xiayuluo.chat-provider', state.provider); } catch { /* Window preference only. */ }
+  await refreshStatus();
+}));
 $('#session-search').addEventListener('input', renderSessions);
 
 $('#chat-form').addEventListener('submit', guarded(sendMessage));

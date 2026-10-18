@@ -209,7 +209,7 @@ def test_no_release_is_not_reported_as_up_to_date(client_factory, monkeypatch):
 
 def test_release_versions_and_pinned_configs_match():
     from tools.release import verify_versions
-    assert verify_versions(__version__) == 2
+    assert verify_versions(__version__) == 3
 
 
 def test_install_cannot_replace_config_data_or_codex_workspace(tmp_path):

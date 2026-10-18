@@ -56,7 +56,7 @@ def test_rejection_and_expiry_cannot_execute(client_factory):
 
 
 def test_credentials_never_appear_in_status_and_missing_provider_is_actionable(client_factory, tmp_path):
-    client, _ = client_factory(settings=Settings(api_key='', data_dir=str(tmp_path)))
+    client, _ = client_factory(settings=Settings(api_key='', data_dir=str(tmp_path), chat_provider='api'))
     session = new_session(client)
     assert client.post('/api/chat', json={"session_id": session, "message": "你好"}).status_code == 409
     status = client.get('/api/bootstrap')

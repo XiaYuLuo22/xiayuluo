@@ -5,10 +5,11 @@ import * as FS from 'expo-file-system/legacy';
 import { File } from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
 import config from './update-config.json';
+import appConfig from '../app.json';
 import { newer, verifyRelease, type Release } from './updateProtocol';
 
-export const currentVersion = Application.nativeApplicationVersion || '0.1.1';
-const currentCode = Number(Application.nativeBuildVersion || '2');
+export const currentVersion = Application.nativeApplicationVersion || appConfig.expo.version;
+const currentCode = Number(Application.nativeBuildVersion || appConfig.expo.android.versionCode);
 let downloading = false;
 export async function checkUpdate(): Promise<{ release: Release; available: boolean }> {
   const abort = new AbortController(), timer = setTimeout(() => abort.abort(), 20000);
