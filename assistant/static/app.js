@@ -451,7 +451,7 @@ function renderSettings() {
   const source = state.provider === 'auto' ? status.model.provider : state.provider;
   const sourceReady = source === 'codex' ? status.model.codex_chat_available : status.model.api_configured;
   [{ title: '日常对话', ready: sourceReady, detail: sourceReady ? (source === 'codex' ? 'Codex · CLI 已找到，ChatGPT 登录与会员额度需实际调用验证；逐次确认。' : `${status.model.api_name} · API 配置存在，连接需实际调用验证。`) : '尚未连接，请选择 Codex 登录问答，或配置模型 API。' },
-    { title: 'Codex CLI', ready: status.codex.available, detail: status.codex.available ? `${status.codex.workspace} · ${status.codex.sandbox} · ${status.codex.reason}` : status.codex.reason },
+    { title: 'Codex 编程（可选）', ready: status.codex.available, detail: status.codex.available ? `${status.codex.workspace} · ${status.codex.sandbox} · ${status.codex.reason}` : status.codex.reason },
     { title: '桌面驱动', ready: status.desktop.available, detail: status.desktop.available ? '主屏幕截图与鼠标点击可用，需用户确认' : status.desktop.reason }].forEach((item) => {
     const row = el('div', 'connection-row'); const info = el('div'); info.append(el('strong', '', item.title), el('small', '', item.detail));
     row.append(el('span', `status-dot${item.ready ? '' : ' off'}`), info); $('#settings-status').append(row);
