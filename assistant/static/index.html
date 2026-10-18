@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>夏鱼洛 · 你的日常助手</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/chat-app.css">
+  <script src="/static/vendor/marked.js" defer></script>
+  <script src="/static/vendor/dompurify.js" defer></script>
+  <script src="/static/debug.js" defer></script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body class="inspector-closed">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="夏鱼洛助手首页"><span class="brand-symbol">✦</span><span>夏鱼洛<span class="brand-en">XIAYULUO</span></span></a>
+      <button id="new-chat" class="new-chat"><span>＋</span> 新建会话 <kbd>Ctrl K</kbd></button>
+      <div class="nav-label">我的助手</div>
+      <nav aria-label="主导航">
+        <button class="nav-item active" data-view="chat" title="聊天"><span class="nav-icon">◌</span><span>聊天</span></button>
+        <button class="nav-item" data-view="memory" title="记忆"><span class="nav-icon">▦</span><span>记忆</span></button>
+        <button class="nav-item" data-view="desktop" title="屏幕助手"><span class="nav-icon">▱</span><span>屏幕助手</span></button>
+        <button class="nav-item" data-view="plugins" title="工具箱"><span class="nav-icon">◇</span><span>工具箱</span></button>
+        <button class="nav-item" data-view="tasks" title="待确认任务"><span class="nav-icon">☑</span><span>待确认任务</span></button>
+        <button class="nav-item" data-view="devices" title="设备与同步"><span class="nav-icon">⌁</span><span>设备与同步</span></button>
+        <button class="nav-item developer-only" data-view="debug" title="事件日志"><span class="nav-icon">≋</span><span>事件日志</span><span id="nav-event-count" class="mini-tag">0</span></button>
+      </nav>
+      <div class="history-label">最近聊过 <span id="session-count">0</span></div>
+      <label class="history-search"><span class="sr-only">搜索会话</span><input id="session-search" type="search" placeholder="搜索会话" autocomplete="off"></label>
+      <div id="session-list" class="session-list"></div>
+      <div class="sidebar-bottom">
+        <div class="local-note"><span class="status-dot"></span><span>记忆保存在本机<small>对话请求发送至配置的模型服务</small></span></div>
+        <button class="nav-item" data-view="settings" title="设置"><span class="nav-icon">⚙</span><span>设置</span></button>
+        <div class="profile"><span class="avatar user-avatar">你</span><div>我的夏鱼洛<small id="platform-label" class="developer-only">LOCAL RUNTIME</small></div><span class="profile-version">本机</span></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="breadcrumb"><span class="app-wordmark">夏鱼洛</span><strong id="view-title">聊天</strong></div>
+        <div class="top-status"><span class="status-dot" id="model-dot"></span><span id="model-status">连接中…</span><button id="toggle-inspector" class="icon-button developer-only" aria-label="切换检查面板" aria-expanded="false">◫ <span>Inspector</span></button></div>
+      </header>
+
+      <section id="view-chat" class="view chat-view">
+        <div class="workspace-heading developer-only"><div><span class="eyebrow">PLAYGROUND</span><h1>对话调试</h1></div><div class="workspace-route"><span id="route-label">POST /api/chat</span><small id="current-session">session: —</small></div></div>
+        <div class="run-metrics developer-only" aria-label="本轮运行指标">
+          <div><span>运行状态</span><strong id="metric-state" class="run-state" data-state="idle">IDLE</strong></div>
+          <div><span>首段耗时</span><strong id="metric-first">—</strong></div>
+          <div><span>总耗时</span><strong id="metric-duration">—</strong></div>
+          <div><span>SSE 事件</span><strong id="metric-events">0</strong></div>
+          <div><span>输出字符</span><strong id="metric-output">0</strong></div>
+        </div>
+        <div id="chat-scroll" class="chat-scroll">
+          <div id="welcome" class="welcome">
+            <div class="welcome-symbol" aria-hidden="true">✦</div>
+            <div class="boot-label developer-only"><span class="status-dot"></span> DEVELOPER MODE / v0.1.0</div>
+            <h2>你好，我是夏鱼洛</h2>
+            <p>一起聊聊生活，也一起把事情做好。<br>今天有什么想法？</p>
+            <div class="suggestions">
+              <button data-suggestion="我想和你聊聊今天发生的事。"><span class="suggestion-icon mint">◌</span><strong>随便聊聊</strong><small>分享日常，理清思绪</small><span class="arrow">↗</span></button>
+              <button data-suggestion="帮我分析当前项目的结构和启动方式，先给出检查计划。" data-mode="codex"><span class="suggestion-icon lavender">⌘</span><strong>一起写代码</strong><small>把编程任务交给 Codex</small><span class="arrow">↗</span></button>
+              <button data-open="desktop"><span class="suggestion-icon peach">▱</span><strong>帮我看屏幕</strong><small>看截图，确认后帮你点击</small><span class="arrow">↗</span></button>
+              <button data-open="memory"><span class="suggestion-icon yellow">▦</span><strong>让你更懂我</strong><small>管理偏好和四级记忆</small><span class="arrow">↗</span></button>
+            </div>
+            <button id="connection-hint" class="connection-hint" data-open="settings" hidden>连接对话模型，开始第一次聊天 <span>去设置 →</span></button>
+          </div>
+          <div id="messages" class="messages" aria-live="polite" aria-relevant="additions"></div>
+        </div>
+        <div class="composer-wrap">
+          <div id="retrieval-note" class="retrieval-note" hidden></div>
+          <div id="screen-attachment" class="attachment" hidden><span>▱ 已附上主屏幕截图 · 将发送给模型</span><button id="remove-attachment" aria-label="移除截图">×</button></div>
+          <form id="chat-form" class="composer">
+            <label class="sr-only" for="prompt">输入消息</label>
+            <textarea id="prompt" rows="2" maxlength="12000" placeholder="和夏鱼洛聊聊，或交给我一件事…"></textarea>
+            <div class="composer-toolbar"><div class="composer-tools"><button type="button" id="mode-toggle" class="mode-pill">◌ 日常对话 <span>⌄</span></button><button type="button" id="attach-screen" class="tool-button" title="查看并附上本机截图">▱ <span>附上屏幕</span></button></div><div class="send-tools"><small>Enter 发送 · Shift Enter 换行</small><button type="submit" id="send" class="send-button" aria-label="发送消息">↑</button><button type="button" id="stop" class="stop-button" hidden>■ 停止</button></div></div>
+          </form>
+          <div class="composer-caption"><span>回答可能有误，请核实重要信息</span><span>工具操作由你确认</span></div>
+        </div>
+      </section>
+
+      <section id="view-memory" class="view content-view" hidden>
+        <div class="page-heading"><div><div class="eyebrow">MEMORY</div><h1>记住你想留下的事</h1><p>临时性、一级、二级、永久。什么值得记住，由你决定。</p></div><button id="add-memory" class="primary-button">＋ 添加记忆</button></div>
+        <div class="memory-levels" id="memory-levels"></div>
+        <div class="section-heading"><h2 id="memory-list-title">一级记忆</h2><button id="clear-memory" class="text-button danger">清空全部记忆与对话</button></div>
+        <p class="section-note">一级保留 7 天；累计检索 3 次晋升二级。二级保留 30 天，检索后续期；永久层只由你确认。过期内容不再被自动检索。</p>
+        <div id="memory-list" class="memory-list"></div>
+      </section>
+
+      <section id="view-desktop" class="view content-view" hidden>
+        <div class="page-heading"><div><div class="eyebrow">SCREEN ASSISTANT</div><h1>一起看看你的屏幕</h1><p>主动获取截图，选好位置，确认后帮你点击。</p></div><button id="capture-screen" class="primary-button">▱ 获取截图</button></div>
+        <div class="notice" id="desktop-notice"></div>
+        <div class="screen-card"><div class="screen-toolbar"><span id="screen-dimensions">主屏幕 · 尚未截图</span><span class="mini-tag">APPROVAL REQUIRED</span></div><div id="screen-empty" class="screen-empty"><span>▱</span><h3>等待本机截图</h3><p>截图仅在本机展示。主动附到对话后，才会发送给模型。</p></div><div id="screen-container" class="screen-container" hidden><img id="screen-image" alt="本机主屏幕截图，点击图片可选择坐标"><span id="click-marker" class="click-marker" hidden>＋</span></div><div class="screen-footer"><span id="selected-position">先获取截图，再选择目标位置</span><div><button id="share-screen" class="secondary-button" disabled>附到对话</button><button id="request-click" class="primary-button" disabled>提出点击请求</button></div></div></div>
+        <div class="info-grid"><article><span>01</span><h3>明确范围</h3><p>首版仅控制主屏幕，支持单次左键或右键点击。</p></article><article><span>02</span><h3>确认每一步</h3><p>执行前展示坐标；截图过期或目标变化时需重新选择。</p></article><article><span>03</span><h3>随时中止</h3><p>将鼠标移到主屏幕左上角可触发 PyAutoGUI 紧急停止。</p></article></div>
+      </section>
+
+      <section id="view-plugins" class="view content-view" hidden>
+        <div class="page-heading"><div><div class="eyebrow">TOOLBOX</div><h1>让想法变成行动</h1><p>编程、屏幕操作和记忆管理。更多能力可以继续扩展。</p></div><span class="badge">执行前需确认</span></div>
+        <div id="plugin-list" class="plugin-grid"></div>
+        <div class="extension-note developer-only"><span>◇</span><div><h3>注册新能力</h3><p>在 assistant/tools.py 的 build_registry() 注册插件。参数校验、可用性检查和确认流程由统一接口承载。</p></div></div>
+      </section>
+
+      <section id="view-tasks" class="view content-view" hidden>
+        <div class="page-heading"><div><div class="eyebrow">APPROVALS</div><h1>每一步行动，由你确认</h1><p>手机和当前电脑提出的任务集中在这里。请求 2 分钟后过期，不会自动执行。</p></div><button id="refresh-tasks" class="secondary-button">刷新任务</button></div>
+        <div id="pending-tasks" class="memory-list"></div>
+      </section>
+      <section id="view-devices" class="view content-view" hidden>
+        <div class="page-heading"><div><div class="eyebrow">YOUR DEVICES</div><h1>换个设备，接着聊</h1><p>手机、电脑和开发者模式共用当前电脑上的会话与四级记忆。</p></div><button id="refresh-devices" class="secondary-button">刷新设备</button></div>
+        <div class="settings-card"><h2>手机配对</h2><p id="mobile-setup-note"></p><p>仅通过你配置的 HTTPS 服务连接，电脑需要保持在线。模型密钥和屏幕截图不向手机同步；Codex 和点击仅可在电脑确认执行。</p><button id="invite-device" class="primary-button">生成一次性配对邀请</button><div id="pair-invitation" hidden><p>在手机「设备」页输入你的 HTTPS 同步地址，并粘贴以下邀请。5 分钟有效，只能使用一次；请勿分享给他人。</p><textarea id="pair-code" readonly rows="2" aria-label="一次性配对邀请"></textarea></div></div>
+        <div id="device-list" class="memory-list"></div>
+      </section>
+      <section id="view-debug" class="view content-view" hidden>
+        <div class="page-heading"><div><div class="eyebrow">CLIENT EVENT TRACE</div><h1>请求与事件日志</h1><p>记录当前窗口观测到的请求、SSE 和工具操作，最多保留 300 条。</p></div><div class="heading-actions"><button id="clear-events" class="secondary-button">清空日志</button><button id="export-events" class="primary-button">导出 JSON</button></div></div>
+        <div class="debug-toolbar"><label for="event-filter">事件类型<select id="event-filter"><option value="all">全部事件</option><option value="http">HTTP</option><option value="sse">SSE</option><option value="tool">工具操作</option><option value="error">错误 / 停止</option></select></label><label class="checkbox-label"><input id="record-payload" type="checkbox">记录后续事件的文本内容</label></div>
+        <p class="section-note">日志只保存在当前窗口内存，刷新后清空。密钥与截图始终过滤；关闭文本记录会移除已有日志中的文本。日志不包含 Codex 内部推理。</p>
+        <div id="event-list" class="event-list"></div>
+      </section>
+
+      <section id="view-settings" class="view content-view" hidden>
+        <div class="page-heading"><div><div class="eyebrow">SETTINGS</div><h1>你的助手，你的设置</h1><p>查看连接状态，管理隐私，按需开启开发者模式。</p></div><button id="refresh-status" class="secondary-button">刷新状态</button></div>
+        <div class="settings-card preference-card"><div><h2>开发者模式</h2><p>显示运行指标、事件日志、工具参数和检查面板。默认关闭。</p></div><label class="switch"><input id="developer-mode" type="checkbox" role="switch" aria-label="开发者模式"><span aria-hidden="true"></span></label></div>
+        <div id="settings-status" class="settings-status"></div>
+        <div class="settings-card"><h2>版本与更新</h2><p id="update-status" role="status" aria-live="polite">点击检查已发布的新版本。更新需确认，不影响配置和四级记忆。</p><pre id="update-notes" hidden></pre><button id="check-update" class="secondary-button">检查更新</button> <button id="install-update" class="primary-button" hidden>下载并重启更新</button><p>仅 Windows 发行版支持应用内替换安装；源码版不会被自动覆盖。云端代码需要构建、签名并发布后才会成为更新。</p></div>
+        <details class="settings-card developer-only"><summary>当前运行元数据</summary><pre id="runtime-json"></pre></details>
+        <details class="settings-card"><summary>连接模型与 Codex（首次使用）</summary><p>首版需在本机 .env 配置连接后重启 App。桌面原生菜单「夏鱼洛 → 打开配置目录」可找到此文件。模型密钥只写入本机，界面不会读取或展示它。</p><pre>OPENAI_API_KEY=你的密钥
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-4.1-mini
+CODEX_WORKSPACE=C:/Users/you/projects/my-project
+CODEX_SANDBOX=read-only
+DESKTOP_ENABLED=true</pre><p>Codex 使用本机安装的 CLI：先运行 <code>npm install -g @openai/codex</code>，再运行 <code>codex login</code>。需要它修改项目时，将沙箱改为 <code>workspace-write</code>。</p></details>
+        <div class="settings-card"><h2>记忆与隐私</h2><p>记忆和对话保存在 .assistant/memory.sqlite3；临时记忆只在运行中的服务内保留，重启后清空。历史对话不等于永久记忆。</p><p>发送对话时，近期上下文及最多 6 条相关记忆会发送给配置的模型服务。Codex 任务交给其自身配置的服务；其他时间不会后台发送屏幕或记忆。</p></div>
+      </section>
+    </main>
+
+    <aside class="insight-panel developer-only" id="inspector" aria-label="调试检查面板">
+      <div class="inspector-heading"><span>◫ INSPECTOR</span><button id="close-inspector" class="icon-button" aria-label="关闭检查面板">×</button></div>
+      <div class="inspector-tabs" role="tablist" aria-label="检查类别"><button id="tab-runtime" role="tab" aria-controls="inspect-runtime" aria-selected="true" data-inspector="runtime" class="active">运行</button><button id="tab-context" role="tab" aria-controls="inspect-context" aria-selected="false" data-inspector="context">上下文</button><button id="tab-events" role="tab" aria-controls="inspect-events" aria-selected="false" data-inspector="events">事件</button></div>
+      <section id="inspect-runtime" class="inspector-content" role="tabpanel" aria-labelledby="tab-runtime">
+        <div class="insight-heading">RUNTIME</div><dl id="runtime-details" class="runtime-details"></dl>
+        <div class="insight-divider"></div><div class="insight-heading">CONNECTED TOOLS</div><div id="capabilities" class="capabilities"></div>
+        <div class="inspector-callout"><span>OBSERVED, NOT ASSUMED</span><p>“已配置”仅表示配置存在。连接与权限以实际请求结果为准。</p></div>
+      </section>
+      <section id="inspect-context" class="inspector-content" role="tabpanel" aria-labelledby="tab-context" hidden>
+        <div class="insight-heading">MEMORY LAYERS</div><div id="memory-summary" class="memory-summary"></div><button class="text-button memory-link" data-open="memory">打开记忆管理 ↗</button>
+        <div class="insight-divider"></div><div class="insight-heading">LAST RETRIEVAL</div><div id="retrieval-details" class="retrieval-details"><p class="section-note">尚未收到记忆检索事件。</p></div>
+      </section>
+      <section id="inspect-events" class="inspector-content" role="tabpanel" aria-labelledby="tab-events" hidden>
+        <div class="insight-heading">RECENT EVENTS <span id="inspector-event-count">0</span></div><div id="recent-events" class="recent-events"></div><button class="text-button memory-link" data-open="debug">打开完整事件日志 ↗</button>
+      </section>
+      <div class="inspector-footer"><span class="status-dot"></span>LOCAL / APPROVAL REQUIRED</div>
+    </aside>
+  </div>
+  <footer class="statusbar developer-only"><div><span class="status-dot"></span>夏鱼洛 <span id="footer-runtime">local runtime</span></div><div><span id="footer-session">无活动会话</span><span id="footer-events">0 events</span><span>UTF-8</span></div></footer>
+  <dialog id="memory-dialog"><form id="memory-form"><div class="dialog-heading"><h2>添加记忆</h2><button type="button" data-close="memory-dialog" aria-label="关闭">×</button></div><p>仅记录你希望助手记住的内容，避免填写密钥等敏感信息。</p><label>保留层级<select id="memory-tier"><option value="first">一级 · 7 天</option><option value="second" selected>二级 · 30 天</option><option value="permanent">永久 · 直到手动删除</option></select></label><label>内容类型<select id="memory-kind"><option value="fact">事实 / 偏好</option><option value="procedure">做事方法</option><option value="episode">经历 / 片段</option></select></label><label>记忆内容<textarea id="memory-content" rows="4" maxlength="2000" required placeholder="例如：我喜欢直接、简洁的回答。"></textarea></label><button type="submit" class="primary-button">确认保存</button></form></dialog>
+  <dialog id="action-dialog"><div class="dialog-heading"><h2 id="action-title">确认操作</h2><button type="button" id="close-action" aria-label="拒绝操作">×</button></div><p id="action-description"></p><pre id="action-details"></pre><p class="section-note">请求在 2 分钟后过期。已开始的屏幕单次点击无法撤回。</p><div class="dialog-footer"><button id="decline-action" class="secondary-button">取消</button><button id="approve-action" class="primary-button">确认执行</button></div></dialog>
+  <dialog id="plugin-dialog"><form id="plugin-form"><div class="dialog-heading"><h2 id="plugin-title"></h2><button type="button" data-close="plugin-dialog" aria-label="关闭">×</button></div><p>填写插件参数，提交后仍需确认执行。</p><label>JSON 参数<textarea id="plugin-arguments" rows="7" required spellcheck="false"></textarea></label><button class="primary-button" type="submit">提出操作请求</button></form></dialog>
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>

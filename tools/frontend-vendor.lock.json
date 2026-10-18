@@ -1,0 +1,29 @@
+{
+  "packages": [
+    {
+      "name": "marked",
+      "version": "18.1.0",
+      "repository": "https://github.com/markedjs/marked",
+      "license": "MIT",
+      "url": "https://registry.npmjs.org/marked/-/marked-18.1.0.tgz",
+      "integrity": "sha512-PamYXWWWg2nboG3oX5Ffzpy3EFZROqZJK9hSlMmUnekp7TxPs5DcT95vwd46m73/exfKCRVMtgXoPMI4FEJL6w==",
+      "files": [
+        {"source": "package/lib/marked.umd.js", "target": "marked.js", "sha256": "f424dcb508fdf93e0137a970cfce8f3207ea2e3f37eca5f7556a52875683632a"},
+        {"source": "package/LICENSE", "target": "marked.LICENSE", "sha256": "8e3a3f82f59a60958f56ca08f445647c32a4733dc7ca6c2c46f6eb898471ab9c"}
+      ]
+    },
+    {
+      "name": "dompurify",
+      "version": "3.4.16",
+      "repository": "https://github.com/cure53/DOMPurify",
+      "license": "MPL-2.0 OR Apache-2.0",
+      "url": "https://registry.npmjs.org/dompurify/-/dompurify-3.4.16.tgz",
+      "integrity": "sha512-sqo+pNp3qRhCIpbgRi1y8Tgk27Bo2Ry7w0dC1NBeNTdZChWjz9Xb/KOoZbRP/R6pQZ80Qw8YhXw13hWWBbMRnQ==",
+      "files": [
+        {"source": "package/dist/purify.min.js", "target": "dompurify.js", "sha256": "2c90a9b46d6463f26038a29b686e82bc91de01fdac9d5229e7cfe3b360134ea2"},
+        {"source": "package/LICENSE", "target": "dompurify.LICENSE", "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"},
+        {"source": "package/LICENSE-MPL", "target": "dompurify.LICENSE-MPL", "sha256": "fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,170 @@
+# 夏鱼洛 · 你的日常桌面助手
+
+Windows 优先的可扩展桌面 App：独立窗口、日常文字对话、逐字流式响应、本机 Codex 调用、截图与确认式鼠标点击，以及按保留时长分层的四级记忆。默认入口会自动管理内部服务，不需要手动打开浏览器。桌面运行、.exe 打包和用户数据路径见 [DESKTOP.md](DESKTOP.md)。
+
+这是可运行的首版。语音、键盘输入、多屏幕控制和无人值守自动操作尚未实现。
+
+0.1.1 起新增 App 内检查更新：Windows 发行版在设置中下载并重启升级，安卓在设备页下载并交给系统确认。保留原安装位置、配置和四级记忆，采用固定公钥签名和安装包哈希校验。旧包需手动升级一次；更新源尚未正式发布，源码版不能自动覆盖更新。详见 [UPDATES.md](UPDATES.md)。
+
+新增手机 App：`mobile/` 使用 Expo / React Native，Android、iOS 共用聊天、记忆、任务、设备界面。已构建并校验 Android ARM64 私人测试 APK，安装说明见 [ANDROID_INSTALL.md](ANDROID_INSTALL.md)；iOS 尚无 IPA，尚未真机验收，也没有已部署的公网同步服务。可选的电脑主机同步通过 HTTPS 与一次性配对共享会话和四级记忆，手机仅能提出电脑任务，批准和执行留在电脑端。同步默认关闭；设计、连接步骤和安全/构建限制见 [MOBILE.md](MOBILE.md)。
+
+对话支持 Markdown、代码块、列表和表格排版。前端使用官方 [Marked](https://github.com/markedjs/marked) 和 [DOMPurify](https://github.com/cure53/DOMPurify) 的锁定发布版；运行文件随应用提供，聊天时不访问 CDN。用户输入保持纯文本，助手内容经过 HTML 过滤；回复中的远程图片、表单、脚本和事件处理器不被加载。链接只支持明确的 HTTP(S) 地址，点击后在新标签页打开。
+
+## 日常聊天 App
+
+默认界面采用简洁的聊天布局：左侧会话历史与搜索、中间对话、底部输入框。首页可直接开始日常聊天、Codex 编程、屏幕协助或记忆管理；回复支持流式显示与复制，历史会话可以切换和删除。未连接模型时，首页显示设置入口，而不会声称模型已可用。
+
+它参考常见聊天助手的交互习惯，保留夏鱼洛自己的视觉设计；不是 ChatGPT 或豆包的客户端，也不复用它们的账号或服务。首版仍需在本机 `.env` 中配置模型连接；语音、云账号同步和安装向导尚未实现。手机开发原型与当前构建状态见 MOBILE.md。
+
+## 可选开发者模式
+
+在「设置」开启「开发者模式」，切换到深色工作台，显示当前运行状态、首段耗时、总耗时、实际 SSE 事件数和输出字符数；右侧 Inspector 提供运行配置、四级记忆计数、最近一次召回详情和最近事件。窄屏时可以用顶栏按钮打开或关闭检查面板。默认关闭，日常界面不展示日志、参数 Schema 或技术状态栏。关闭开发者模式会同时停止文本日志记录并移除已有日志中的文本。偏好仅保存在该窗口的 WebView 存储中，桌面 App 重新启动后不保证保留。
+
+「事件日志」支持按 HTTP、SSE、工具操作和错误筛选、展开 JSON、清空和导出。日志仅保存在当前窗口内存中，最多保留 300 条；刷新后清空，不写入记忆数据库。默认只记录元数据，勾选「记录后续事件的文本内容」后才保留后续对话/工具文本；取消勾选会移除已有日志中的文本。密钥、认证头和截图始终被过滤。
+
+指标是**浏览器实际观测值**：首段耗时从发起流式请求计算到接收第一段非空文本，包含网络与本地处理；SSE 事件数不是模型 token 数。日志不包含模型隐藏推理或 Codex 内部思考。开启开发者模式后，工具参数 Schema 在「工具箱」中查看，平台、Python、接口地址和沙箱等元数据在「设置」中查看；配置存在不代表已经通过真实连接验证。
+
+## Windows 启动
+
+安装 64 位 Python 3.12（或 Python 3.11+）后，完整解压，直接双击 **`start.cmd`**。首次自动创建 `.venv` 并联网安装 App、聊天服务和屏幕工具依赖；后续检查通过会跳过重复安装。缺失 `uvicorn` 等依赖会尝试修复，失败时窗口停留并展示原因。无需管理员权限，不覆盖已有 `.env` 和记忆；安装时请勿同时打开多个启动窗口。
+
+Python 或 WebView2 缺失时会给出官方下载地址，不会自动安装系统软件。模型连接和 Codex 登录仍需要你配置；Codex 不在 Python 依赖中自动安装。需要它时另装 Node.js 22+ 和 Codex CLI。
+
+如需手动安装，可在仓库目录运行 PowerShell：
+
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -c requirements.lock -e ".[app,desktop]"
+```
+
+编辑 `.env`，填写自己的模型配置；密钥只存在本机，切勿提交到 Git：
+
+```dotenv
+OPENAI_API_KEY=你的模型密钥
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-4.1-mini
+DESKTOP_ENABLED=true
+CODEX_WORKSPACE=C:/Users/you/projects/my-project
+CODEX_SANDBOX=read-only
+```
+
+```powershell
+.\.venv\Scripts\python.exe -m assistant
+```
+
+运行后会打开「夏鱼洛」桌面窗口；首次启动会在 `.env` 不存在时生成空白配置。修改 `.env` 后需要退出并重新启动 App。一键启动会保留启动窗口供诊断，关闭 App 后正常退出；关闭窗口会停止本 App 的内部服务和活动任务。要生成免安装的 Windows .exe，请运行 `build-app.cmd`；完整说明见 [DESKTOP.md](DESKTOP.md)。
+
+模型需支持 OpenAI 兼容的 `/chat/completions` 流式接口；工具调用需要 function calling，理解截图需要视觉能力。本地 OpenAI 兼容服务也可使用，将地址设为 `http://127.0.0.1:端口/v1`，并按该服务要求配置密钥。模型未配置时，仍可管理记忆和使用已配置的本机插件。
+
+云环境如保留了 `OPENAI_` 变量名，可通过环境设置安全绑定 `ASSISTANT_MODEL_KEY`；应用优先使用此变量。它与本机的 `OPENAI_API_KEY` 用途相同。云网络需允许模型服务域名；使用 ChatGPT 登录的 Codex 时还需允许 `chatgpt.com`。云环境的网络和 CLI 状态不代表你的 Windows 本机状态。
+
+## Codex
+
+```powershell
+npm install -g @openai/codex
+codex login
+```
+
+设置 `CODEX_WORKSPACE` 为**已有项目目录**。选择聊天输入框的「Codex 编程」，发送任务并确认目录、沙箱与任务内容后执行。也可在日常对话中要求助手调用 Codex。
+
+默认 `read-only`。如需修改该项目，将 `CODEX_SANDBOX` 改为 `workspace-write` 并重启；每个任务仍需确认。应用不会使用禁用沙箱或绕过审批的选项。Codex 自身的登录、网络、沙箱支持和执行权限必须正常；遇到问题先在目标项目目录直接运行 `codex`。Windows 沙箱如被 CLI 提示未初始化，先按 CLI 的引导完成初始化。公司代理或特殊配置应通过 CLI 的支持方式配置。
+
+Codex 的任务状态实时显示；CLI 的完整消息在相应 JSON 事件到达时显示，**不保证 Codex 输出逐字显示**。模型日常对话采用独立的 token 流。停止任务会终止本应用启动的 CLI 进程树；已写入文件的变更不会自动撤销。
+
+## 桌面操作
+
+在运行此服务的 Windows 电脑上安装 `desktop` 依赖，并设置 `DESKTOP_ENABLED=true`。进入「桌面操作」，获取截图、选择位置、提出点击请求，再确认执行。API 同样支持右键单击。
+
+截图有效期 2 分钟。点击前检查主屏幕大小和目标周围 41×41 像素，目标改变或截图过期会拒绝执行。将鼠标移到主屏幕左上角，可触发 PyAutoGUI 的 fail-safe。单次点击一旦发生无法撤回。
+
+首版只控制**主屏幕**。Windows 使用 DPI awareness 校正坐标，若实际截图与鼠标尺寸仍不一致，会拒绝点击。管理员/UAC 安全桌面和某些高权限应用可能无法控制。当前云开发机没有你的 Windows 桌面；真实截图和点击必须在你的本机验收。
+
+截图默认只在本机界面展示。点击「附到对话」并发送后，图片才会提交给模型；此时模型可提出坐标点击，但依然需要你的确认。动态视频、动画按钮或鼠标悬停导致目标变化时，需要刷新截图重试。
+
+## 四级记忆
+
+这四级按保留时长和强化程度划分；事实、偏好、经历、方法是**内容类型**，不是层级。
+
+| 层级 | 默认规则 | 来源与晋升 |
+| --- | --- | --- |
+| 临时性 | 内存中最近 12 条消息，最多 18,000 字符；闲置 2 小时或重启后清空 | 当前对话上下文，不自动变成永久记忆 |
+| 一级 | 7 天未使用后退出检索 | 用户消息自动形成原始对话片段；累计检索 3 次晋升二级 |
+| 二级 | 每次检索后续期 30 天 | 一级强化或用户明确保存；保留原始内容类型，不把提问推断为事实 |
+| 永久 | 不自动过期 | 仅由用户保存/确认晋升；可手动降级或删除 |
+
+检索采用本机中文二字词与英文词匹配，综合相关性、近期使用和重复使用次数，最多取 6 条。经过确认的二级/永久事实会作为偏好背景参与对话；经历和方法需相关匹配。**这是可解释的基础实现，尚未使用向量嵌入、模型总结或睡眠整理。**
+
+临时记忆、全部历史聊天与可检索记忆是不同用途：历史消息保存在本机供用户回看；过期的一级/二级记忆不会再被召回，但不会静默删除历史。记忆页支持添加、永久化、降级和删除；删除会话会删除它自动生成的记忆，手动另存的内容会保留。清空操作删除所有记忆与聊天记录，并压缩数据库；外部备份不在删除范围内。
+
+数据位于 `.assistant/memory.sqlite3`，可用 `ASSISTANT_DATA_DIR` 修改。关闭服务后再备份整个数据目录。数据是普通本机 SQLite 文件，**未加密**；可以通过 Windows 磁盘加密保护，不建议记录敏感凭据。每次对话会把临时上下文和召回的相关记忆发给配置的模型服务，Codex 任务则使用其自身配置的服务。
+
+## 新增能力
+
+插件接口在 `assistant/plugins.py`；注册点是 `assistant/tools.py` 的 `build_registry()`。插件需提供名称、说明、Pydantic 参数模型、可用性检查和异步 `execute()` 方法。例如：
+
+```python
+from pydantic import BaseModel, ConfigDict
+
+class ExampleArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    topic: str
+
+class ExamplePlugin:
+    name = "example_tool"
+    title = "示例能力"
+    description = "按主题执行一个任务；需用户确认。"
+    arguments = ExampleArgs
+
+    def available(self):
+        return True, ""
+
+    async def execute(self, arguments):
+        return {"message": f"处理完成：{arguments.topic}"}
+
+# 在 build_registry 中加入：registry.register(ExamplePlugin())
+```
+
+界面自动从插件 catalog 渲染新增能力和 JSON 参数表单；模型自动获得可用工具的 schema。所有新增插件也走「提出请求 → 用户确认 → 执行」流程。插件是本机可信 Python 代码，不应安装不可信来源。新增依赖、权限和配置需要在插件中说明。语音后续可增加浏览器音频流或 Realtime API 适配层，复用记忆和插件服务。
+
+## 开发与测试
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -c requirements.lock -e ".[test]"
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+Linux 云开发机可以不安装桌面依赖：
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -c requirements.lock -e '.[test]'
+.venv/bin/python -m pytest -q
+.venv/bin/python -m assistant --serve
+```
+
+浏览器验收测试是独立可选依赖；安装后使用本机 Chromium 或 Playwright 的浏览器：
+
+```bash
+.venv/bin/python -m pip install -c requirements.lock -e '.[test,browser]'
+# 如系统没有 Chromium：
+.venv/bin/python -m playwright install chromium
+.venv/bin/python -m pytest -q
+```
+
+未安装 `browser` 时，浏览器测试会明确标记为跳过；核心 API、记忆和工具测试仍执行。可用 `ASSISTANT_BROWSER` 指定 Chromium 可执行文件。
+
+自动化测试使用受控模型流与桌面替身，不需要真实 API 密钥，也不会点击真实桌面。应用只接受本机 Host、同源请求和本轮服务生成的会话令牌；配置页面只显示是否配置，不输出密钥。请保持回环监听，不将控制接口直接暴露到公网。
+
+## 开源依赖与临时文件
+
+依赖来源、版本和许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。复用有明确用途的组件，插件也通过同样的来源、许可和参数校验流程接入。
+
+校验已随应用保存的前端运行文件，不需要网络：
+
+```powershell
+.\.venv\Scripts\python.exe tools/vendor_frontend.py --check
+```
+
+缺失时可用 `tools/vendor_frontend.py` 从官方 npm HTTPS 发布包恢复锁定版本。恢复时校验归档 SHA-512 和文件 SHA-256，仅保留运行文件和许可证；不会执行 npm 安装脚本，也不会留下解包目录。运行应用不需要执行此恢复步骤。
+
+开发结束后可清理 `build/`、`.pytest_cache/`、项目源码中的 `__pycache__/`、已使用的安装下载缓存和临时发布包，它们可重新生成。`.venv/` 是当前运行依赖；`.env` 是本机配置；`.assistant/` 是记忆数据；源码、测试和许可证是项目的一部分，应保留。项目的 `.egg-info/` 在 editable 安装期间承载 Python 包元数据，运行中不删除。`tools/` 保存可复用的依赖校验工具，不是一次性下载目录。

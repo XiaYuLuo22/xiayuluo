@@ -1,0 +1,18 @@
+// Loaded only for explicitly requested private APK builds. No secrets in the APK/source.
+gradle.beforeProject { project ->
+    project.pluginManager.withPlugin("com.android.application") {
+        project.extensions.getByName("androidComponents").finalizeDsl { android ->
+            def keystore = System.getenv("XIAYULUO_ANDROID_KEYSTORE")
+            def password = System.getenv("XIAYULUO_ANDROID_STORE_PASSWORD")
+            if (!keystore || !password) {
+                throw new GradleException("Private signing credentials were not supplied by build_android.py")
+            }
+            def signing = android.signingConfigs.create("xiayuluoPrivate")
+            signing.storeFile = new File(keystore)
+            signing.storePassword = password
+            signing.keyAlias = "xiayuluo"
+            signing.keyPassword = password
+            android.buildTypes.getByName("release").signingConfig = signing
+        }
+    }
+}

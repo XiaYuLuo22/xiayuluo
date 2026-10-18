@@ -1,0 +1,25 @@
+{
+  "verified_on": "2026-10-18",
+  "jdk21": {
+    "version": "21.0.12.1",
+    "source": "https://download.oracle.com/java/21/latest/jdk-21_linux-x64_bin.tar.gz",
+    "sha256": "12f870b21301b42292558a3f872ce543affa2b86cb6458591c78388c41ddb111"
+  },
+  "jdk17": {
+    "version": "17.0.20.1+1",
+    "source": "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.20.1%2B1/OpenJDK17U-jdk_x64_linux_hotspot_17.0.20.1_1.tar.gz",
+    "sha256": "3808d1d15e3ec6bd5b84057fb5d84c33d8a1536a258146bcea2e603fc726e08e"
+  },
+  "gradle": {
+    "version": "9.4.1",
+    "source": "https://services.gradle.org/distributions/gradle-9.4.1-bin.zip",
+    "sha256": "2ab2958f2a1e51120c326cad6f385153bb11ee93b3c216c5fccebfdfbb7ec6cb"
+  },
+  "android_command_line_tools": {
+    "source": "https://dl.google.com/android/repository/commandlinetools-linux-16111833_latest.zip",
+    "published_sha1": "e025545c62a8e64c7559119566a569fb1dec5f60",
+    "observed_sha256": "0877a1d048fe4a24efe2eff536ca4223f7adeb58648bb81909d33c446918cfa8"
+  },
+  "sdk_packages": ["platforms;android-37.0", "build-tools;37.0.0", "platform-tools", "ndk;27.1.12297006", "cmake;3.22.1"],
+  "notes": "JDK21's latest URL is mutable: verify the pinned digest or review and update the version and digest together. SDK archives are resolved and checked by Google's SDK installer; do not disable TLS or integrity checks. Toolchains and signing keys are not distributed inside the APK."
+}

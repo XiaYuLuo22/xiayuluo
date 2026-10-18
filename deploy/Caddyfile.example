@@ -1,0 +1,17 @@
+# Example only. Configure your own DNS and valid TLS certificate before use.
+# Run the app with MOBILE_ENABLED=true; keep it bound to 127.0.0.1.
+assistant.example.com {
+    handle /mobile/* {
+        request_body {
+            max_size 64KB
+        }
+        reverse_proxy 127.0.0.1:8765 {
+            header_up Host localhost
+            header_up -X-Assistant-Token
+        }
+    }
+    # Never publish the local UI, bootstrap token, /api, files, or screenshots.
+    handle {
+        respond "Not found" 404
+    }
+}

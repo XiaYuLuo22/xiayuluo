@@ -1,0 +1,101 @@
+# 夏鱼洛 · 手机、电脑与开发端
+
+## 当前交付与边界
+
+手机端是 `mobile/` 中的 Expo / React Native App 源码，Android、iOS 共用界面与协议。不是把桌面网站当成手机安装包。当前“开发端”指同一电脑主机上的开发者模式；另一台独立开发电脑、公共云账号、跨主机数据库合并不是本次已经完成的功能。
+
+当前同步采用 **电脑主机模式**：三端访问同一服务、同一份 SQLite 会话与记忆，避免两份永久记忆互相覆盖。桌面窗口和开发者模式继续本机运行；手机通过一次性邀请配对后，经 HTTPS 连接该电脑。未开启同步的旧用户不受影响。
+
+| 功能 | 手机 | 电脑 | 开发者模式 |
+| --- | --- | --- | --- |
+| 日常聊天 | 原生输入、逐段流式显示、停止、历史搜索 | 现有聊天界面 | 同一会话，增加日志与指标 |
+| 四级记忆 | 按层查看，确认后添加 | 完整添加、调整、删除 | 同一份记忆与召回信息 |
+| Codex | 提出任务，查看待确认项和已保存结果 | 核实目录/权限、确认、执行、停止 | 查看实际事件与状态 |
+| 屏幕 | 不能获取、附加或执行点击 | 主动截图与确认式点击 | 同样需要用户确认 |
+| 设备 | 安全配对、移除本地凭据 | 生成邀请、查看设备、撤销访问 | 同一套设备权限 |
+
+首版不提供账号登录、跨电脑自动合并、离线自动重发、后台推送、语音或手机控制。手机任务页只显示待确认项；Codex 中间过程在电脑实时显示，最终结果保存到共享会话，手机下次刷新可读，不声称手机能直播 Codex 的全部输出。
+
+## 手机界面
+
+- 聊天：夏鱼洛问候、任务建议、日常/Codex 模式、历史会话侧页、底部输入框。
+- 记忆：临时性、一级、二级、永久四个标签；永久记忆保存前弹出明确确认。
+- 任务：所有待电脑确认的请求，没有远程批准按钮；请求有效期 2 分钟。
+- 设备：HTTPS 地址、手机名称、一次性配对邀请；明确显示已连接或未连接。
+
+保留夏鱼洛的浅色与绿色视觉。手机返回前台时立即刷新，在线且不在流式生成时每 5 秒刷新历史、记忆和待确认任务。发起聊天的手机通过 SSE 实时接收回复。其他端看到的是已经保存的消息，不是对每一个生成中的字符广播。
+
+## 同步一致性和隐私
+
+会话 ID、消息、记忆 ID、有效期、使用次数都由电脑服务统一处理。临时记忆仍是电脑服务中最近 12 条上下文、2 小时闲置或重启清空；不在手机持久化。一级 7 天、检索 3 次晋升二级；二级 30 天且检索续期；永久层仅由用户明确保存/确认，不因为手机联网而自动晋升。
+
+同一会话一次只处理一个生成或工具任务，其他端并发操作得到 409，不能悄悄覆盖。关闭 App/电脑服务后，手机不能继续生成或执行电脑任务。草稿仅在手机当前运行内存中保留，退出不保证恢复；没有离线发送队列或自动重试。断线时请求可能已经被电脑接收，请先查看历史或任务列表，再决定是否重发。
+
+模型 API 密钥和 Codex 登录凭据始终留在电脑，不返回手机。手机仅在系统 SecureStore 中保存设备令牌，不写浏览器 localStorage；电脑只存令牌 SHA-256 哈希。邀请随机生成、只能使用一次、5 分钟过期；设备令牌 30 天过期，电脑可随时撤销，撤销后下一次请求立即拒绝。撤销不会撤回已经开始的生成、已写入的文件或已发生的点击。
+
+配对的手机属于同一个用户，能查看该主机的全部会话和记忆；这不是多用户账号隔离。聊天和记忆仍可能包含私人内容，电脑 SQLite 仍未加密，可用 BitLocker 保护。对话推理仍会向你配置的模型服务发送上下文和召回记忆，Codex 使用自己的服务；“没有云同步数据库”不等于“模型推理完全离线”。
+
+## 在 Windows 开启电脑主机
+
+这是开发配置步骤，不会在云端替你部署公网服务，也不会自动打开路由器端口或防火墙。
+
+1. 更新完整源码，包括新的 `assistant/devices.py`、`assistant/mobile_gateway.py` 和桌面静态文件。原有 `.env`、`.assistant` 不要覆盖。
+2. 在本机 `.env` 添加：
+
+   ```dotenv
+   MOBILE_ENABLED=true
+   ASSISTANT_PORT=8765
+   ```
+
+3. 双击 `start.cmd`。启用手机模式后，App 改为占用上述固定的 **127.0.0.1 回环端口**，便于 HTTPS 代理连接；未开启时仍使用原来的随机本地端口。只启动一份主机服务，不要同时运行 `--serve` 和桌面 App。
+4. 用你掌控的域名、证书和 HTTPS 反向代理，仅公开 `/mobile/`。示例见 `deploy/Caddyfile.example`，域名必须替换，DNS、证书与网络可达性需要你实际配置。**不要把整个 8765 端口、根路径 `/`、`/api`、`/api/bootstrap` 或截图接口发布到公网。** 不要关闭 Host/同源检查来绕过连接错误。
+5. 电脑左侧进入「设备与同步」，生成一次性邀请。在手机「设备」页输入自己的 HTTPS 地址，粘贴邀请配对。配对邀请与设备令牌都不要发给别人。
+6. 手机发出 Codex 请求后，到电脑「待确认任务」检查目录、沙箱与任务，再确认执行。手机没有执行批准权限。
+
+首次启用会在 `.assistant/devices.sqlite3` 新建设备权限数据库，不改写原来的记忆数据库。临时配对邀请只在内存，重启后失效；设备凭据状态和撤销记录持久保存。同步连接失败时检查电脑在线、HTTPS 证书、代理的路径范围和 `X-Forwarded-Proto`；可信 HTTPS 代理到回环端口时 Uvicorn 只信任回环代理头，不应扩大代理信任范围。
+
+## 手机开发与构建
+
+依赖版本来自 Expo 58.0.14 官方 `bundledNativeModules.json`，并锁在 `mobile/package-lock.json`（包含 npm integrity）。需要 Node.js 22+；iOS 原生构建需要 macOS/Xcode，Android 安装包需要对应 Android 构建工具，或者你主动选择的 EAS 构建账号。
+
+```powershell
+cd mobile
+npm ci --ignore-scripts
+npm run typecheck
+npm test
+npm start
+```
+
+默认开发服务仅监听 localhost。Android 真机调试需要受信任的 USB/本机开发连接；不要把 Metro 开发服务开放给公网或不受信任的局域网。不要让持有配对凭据的手机加载陌生开发服务的 JavaScript。
+
+`npm run export:android` 生成 Hermes/JS 资源，**不是 APK**。本次另行执行了完整本地 Gradle release 构建并以独立密钥签名，生成可侧载的 Android ARM64 私人测试 APK，未使用 EAS 账号或上传源码。`eas.json` 仍保留可选构建配置；iOS 没有生成、签名或上架 IPA。应用标识是当前开发占位值，正式分发前确认归属。
+
+`npm run preview:web` 仅用于浏览器检查布局，明确禁用配对，不在网页保存设备令牌；这些预览截图不代表手机真机运行。
+
+## 安全审计和验收状态
+
+### 私人 Android APK 构建进度（2026-10-18）
+
+已准备 Android SDK 37.0、Build Tools 37、NDK 27.1、CMake 3.22.1、Gradle 9.4.1、JDK 21 和 JDK 17；官方来源与校验记录见 `tools/android-toolchain.lock.json`。构建脚本 `tools/build_android.py` 使用独立私钥而非公共 debug key，内嵌 JS，并在分发前验证 APK 签名、内嵌 JS 和不含私有配置/数据库。私钥与口令保留在本地 `.android-signing`，不进入源码包或 APK，不要删除或输出它们。
+
+当前已生成 `/tmp/xiayuluo-0.1.1-android-arm64.apk`（23,466,248 字节），手机便于下载的安装 ZIP 为 `/tmp/xiayuluo-0.1.1-android-arm64-install.zip`（10,146,994 字节）。此前 `repo.reactnative.dev` 的 403 阻塞通过环境设置放行解决；本次真实 Gradle release 构建成功（313 个任务），未关闭 TLS/校验或使用公共 debug 签名。
+
+已验证 APK Signature Scheme v2、与 0.1.0 相同的独立签名证书、ZIP CRC、16KB zipalign、内嵌 Hermes JS（1,542,064 字节）及 577 份许可资源；包名 `com.xiayuluo.assistant`，版本 0.1.1 / 2，最低 API 24，目标 API 36，架构 `arm64-v8a`，未启用 debuggable，关闭系统备份。新增 `REQUEST_INSTALL_PACKAGES` 用于用户确认的系统更新；Application 依赖包含正常级别的 Install Referrer 服务权限，但本 App 不调用其渠道查询 API。没有相机、麦克风、悬浮窗和外部存储权限；安全存储依赖声明生物识别/指纹权限，当前未开启生物识别认证。分发包不含 `.env`、密钥库、发布私钥和聊天/设备数据库。更新源尚未发布、未真机覆盖升级，见 UPDATES.md。
+
+当前 APK SHA-256：`accae704b96f622f401d63601fdd01c08afb5332705240846c4eaec5ca965ce7`。独立签名证书 SHA-256：`bef9a3315531035f91362a72fd3012198304fd83d21d07009d67fd1df90ac96a`。这是公开校验信息，不是私钥。旧 0.1.0 的 APK 校验值为 `27f7b095a44517bd97f68046eec57ceb091d0fa339b4366ae0cb61ae74b3a995`；它没有 App 内更新入口，需先手动覆盖升级一次。安装与配对见 `ANDROID_INSTALL.md`。
+
+本地 Linux 构建的基本步骤（要求工具链已经安装）：
+
+```bash
+cd /workspace/xiayuluo/mobile
+npm --cache /workspace/.cache/xiayuluo-npm ci --ignore-scripts --no-audit --no-fund
+EXPO_OFFLINE=1 EXPO_NO_TELEMETRY=1 CI=1 npm --cache /workspace/.cache/xiayuluo-npm exec expo prebuild -- --platform android --no-install
+cd /workspace/xiayuluo
+.venv/bin/python tools/build_android.py --sdk /path/to/android-sdk --java /path/to/jdk21 --java17 /path/to/jdk17 --gradle /path/to/gradle/bin/gradle --signing-dir .android-signing --output /path/to/new-private.apk
+```
+
+当前云机的代理与工具链适配已保存在 `/workspace/.build-tools/android/run_build.py`。该适配器读取当前代理配置但不打印值；保留 TLS、宿主名及发行包校验，JDK 已通过受支持的方式导入当前系统受信任的代理 CA。新环境的 CA 与网络设置可能不同，不能假定快照恢复后无需验证。脚本拒绝覆盖已存在的 APK；再次构建需向适配器传入新的输出路径，例如 `.venv/bin/python /workspace/.build-tools/android/run_build.py /tmp/xiayuluo-next.apk`。目标默认是 `arm64-v8a`，尚未进行真机安装/启动验证。
+
+已验证 Python 同步/配对/撤销/权限测试、真实回环 TCP 的流式转发、手机提交 Codex 后必须电脑批准的受控 CLI 流程、桌面任务界面、手机 TypeScript、协议解析，以及 Android release APK 构建与上述静态校验。未进行 Android/iPhone 真机测试、Windows WebView2 验收、真实公网证书/跨网访问、IPA 构建或应用商店上架。构建成功不等于手机真机或生产安全验收通过。
+
+`npm audit --omit=dev` 在本次检查中报告 Expo/Metro/Xcode **开发工具链**的上游告警：22 项（15 高危、7 中危），包括 braces 模式嵌套 DoS、node-forge 签名校验与旧 uuid。即使名称为 omit=dev，Expo 将构建工具列为其生产依赖，因此不能据此认定全部告警都会进入手机运行包，也不能忽略告警。当前没有验证过的非破坏升级修复；审计建议会将 Expo 降到不兼容的 44，未执行 `audit fix --force` 或盲目改写依赖。正式发布前须跟踪上游修复、重新锁定依赖、检查实际原生/JS 运行包依赖并完成安全与真机验收，当前仅作为开发原型交付。

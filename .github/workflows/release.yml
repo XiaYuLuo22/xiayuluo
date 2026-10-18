@@ -1,0 +1,107 @@
+name: Build and publish signed app update
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Require a version tag
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -notmatch '^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Run this workflow on a version tag.' }
+      - run: python -m pip install -c requirements.lock -e ".[app,desktop,build,test]"
+      - run: python tools/release.py check-version ($env:GITHUB_REF_NAME.Substring(1))
+        shell: pwsh
+      - run: python -m pytest -q tests/test_updates.py tests/test_desktop_app.py tests/test_mobile.py
+      - run: python tools/build_desktop.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-update
+          path: dist/desktop/Xiayuluo-Windows.zip
+          if-no-files-found: error
+
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - name: Prepare and validate source
+        run: |
+          [[ "$GITHUB_REF" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          python -m pip install -c requirements.lock -e '.[test]'
+          python tools/release.py check-version "${GITHUB_REF_NAME#v}"
+          cd mobile
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run typecheck
+          npm test
+          EXPO_NO_TELEMETRY=1 CI=1 npx expo prebuild --platform android --no-install
+      - name: Restore the existing signing identity
+        env:
+          XIAYULUO_ANDROID_KEYSTORE_BASE64: ${{ secrets.XIAYULUO_ANDROID_KEYSTORE_BASE64 }}
+          XIAYULUO_ANDROID_STORE_PASSWORD: ${{ secrets.XIAYULUO_ANDROID_STORE_PASSWORD }}
+        run: python tools/release.py restore-android-key "$RUNNER_TEMP/xiayuluo-android-signing"
+      - name: Install locked SDK components and build the signed APK
+        run: |
+          sdkmanager 'platforms;android-37' 'build-tools;37.0.0' 'ndk;27.1.12297006' 'cmake;3.22.1'
+          python tools/build_android.py --sdk "$ANDROID_HOME" --java "$JAVA_HOME" --java17 "$JAVA_HOME_17_X64" --signing-dir "$RUNNER_TEMP/xiayuluo-android-signing" --output "$RUNNER_TEMP/Xiayuluo-Android-arm64.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-update
+          path: ${{ runner.temp }}/Xiayuluo-Android-arm64.apk
+          if-no-files-found: error
+
+  publish:
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - run: python -m pip install -c requirements.lock -e .
+      - name: Sign the complete release manifest
+        env:
+          XIAYULUO_RELEASE_PRIVATE_KEY: ${{ secrets.XIAYULUO_RELEASE_PRIVATE_KEY }}
+        run: python tools/release.py manifest --version "${GITHUB_REF_NAME#v}" --windows release-assets/Xiayuluo-Windows.zip --android release-assets/Xiayuluo-Android-arm64.apk --notes-file RELEASE_NOTES.md --output release-assets/update.json
+      - name: Publish only after every build and signature succeeds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "夏鱼洛 $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md release-assets/*
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest
