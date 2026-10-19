@@ -1,5 +1,6 @@
 """Controlled CLI fixture; never used by production code."""
 import json
+from pathlib import Path
 import sys
 import time
 
@@ -19,4 +20,9 @@ if prompt == "slow":
 if prompt == "fail":
     print(json.dumps({"type": "turn.failed", "error": {"message": "fixture failure"}}), flush=True)
     sys.exit(1)
+if prompt == "fixture-write-workspace":
+    assert not dialogue
+    assert sys.argv[sys.argv.index('--sandbox') + 1] == 'workspace-write'
+    workspace = Path(sys.argv[sys.argv.index('--cd') + 1])
+    (workspace / 'phone-result.txt').write_text('approved phone instruction', encoding='utf-8')
 print(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": ("chat fixture: " if dialogue else "fixture: ") + prompt}}), flush=True)

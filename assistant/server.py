@@ -37,6 +37,7 @@ class ChatRequest(Payload):
     provider: str | None = Field(default=None, pattern="^(auto|api|codex)$")
     screenshot_id: str | None = Field(default=None, max_length=64)
     voice_token: str | None = Field(default=None, min_length=20, max_length=128)
+    workspace_id: str | None = Field(default=None, pattern="^[a-f0-9]{32}$")
 
 
 class MemoryRequest(Payload):
@@ -233,6 +234,10 @@ def create_app(settings=None, *, memory=None, transport=None):
     async def get_status(session_id: str | None = None):
         return status(session_id)
 
+    @app.get("/api/workspace", dependencies=auth)
+    async def get_workspace():
+        return codex.workspace_status()
+
     @app.get("/api/updates", dependencies=auth)
     async def check_update():
         try:
@@ -384,6 +389,11 @@ def create_app(settings=None, *, memory=None, transport=None):
         item = actions.items.get(action_id)
         if not item:
             raise HTTPException(404, "操作不存在、已处理或已过期。")
+        if item["tool"] == "codex_task":
+            current = codex.workspace_status()
+            original = item.get("workspace", {})
+            if not current["configured"] or any(original.get(key) != current[key] for key in ("id", "sandbox")):
+                raise HTTPException(409, "项目目录或权限已改变，请取消此请求并在当前工作区重新提交。")
         session_id = item["session_id"]
         reserve(session_id)
         actions.take(action_id)
@@ -427,6 +437,11 @@ def create_app(settings=None, *, memory=None, transport=None):
         if not body.message.strip():
             raise HTTPException(422, "消息不能为空")
         require_session(body.session_id)
+        if body.workspace_id is not None:
+            if body.mode != "codex":
+                raise HTTPException(422, "工作区绑定仅用于编程指令，日常问答不读取项目目录。")
+            if body.workspace_id != codex.workspace_status()["id"]:
+                raise HTTPException(409, "电脑工作区已改变，请刷新核对后重新提交；本条指令尚未保存或执行。")
         voice_authorized = body.voice_token is not None
         owner = voice_owner(request)
         if voice_authorized:

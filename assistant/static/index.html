@@ -107,6 +107,7 @@
       </section>
       <section id="view-devices" class="view content-view" hidden>
         <div class="page-heading"><div><div class="eyebrow">YOUR DEVICES</div><h1>换个设备，接着聊</h1><p>手机、电脑和开发者模式共用当前电脑上的会话与四级记忆。</p></div><button id="refresh-devices" class="secondary-button">刷新设备</button></div>
+        <div class="settings-card"><h2>共享工作区</h2><p id="shared-workspace-name"></p><p id="shared-workspace-id"></p><p id="shared-workspace-policy"></p><p>在手机「任务」页核对同一编号。手机提交指令，本机「待确认任务」批准后执行；结果保存回原会话。完整项目目录仅在电脑显示。</p></div>
         <div class="settings-card"><h2>手机配对</h2><p id="mobile-setup-note"></p><p>仅通过你配置的 HTTPS 服务连接，电脑需要保持在线。模型密钥和屏幕截图不向手机同步；Codex 和点击仅可在电脑确认执行。</p><button id="invite-device" class="primary-button">生成一次性配对邀请</button><div id="pair-invitation" hidden><p>在手机「设备」页输入你的 HTTPS 同步地址，并粘贴以下邀请。5 分钟有效，只能使用一次；请勿分享给他人。</p><textarea id="pair-code" readonly rows="2" aria-label="一次性配对邀请"></textarea></div></div>
         <div id="device-list" class="memory-list"></div>
       </section>

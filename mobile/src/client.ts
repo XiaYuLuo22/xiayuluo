@@ -7,7 +7,10 @@ export type Connection = { url: string; token: string; name: string; id: string 
 export type Session = { id: string; title: string };
 export type Message = { id: number; role: string; content: string };
 export type Memory = { id: string; tier: string; content: string; expires_at: string | null };
-export type Action = { id: string; title: string; session_id: string; created_at: string };
+export type Workspace = { id: string | null; name: string; configured: boolean; available: boolean;
+  sandbox: 'read-only' | 'workspace-write'; approvals: 'desktop-only' };
+export type Action = { id: string; title: string; session_id: string; created_at: string;
+  tool: string; arguments: { prompt?: string }; workspace?: Workspace };
 const storageKey = 'xiayuluo.connection.v1';
 
 export async function loadConnection(): Promise<Connection | null> {

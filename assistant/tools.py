@@ -3,9 +3,11 @@ from collections import OrderedDict
 from contextlib import aclosing, contextmanager
 from datetime import datetime, timezone
 from io import BytesIO
+import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import shutil
 import signal
 import subprocess
@@ -201,6 +203,26 @@ class Codex:
             return False, str(error)
         return True, "CLI 已找到；登录和执行权限以实际调用结果为准。"
 
+    def workspace_status(self):
+        """Public project identity, not a filesystem path or an authorization token."""
+        directory = None
+        if self.settings.codex_workspace:
+            try:
+                candidate = Path(self.settings.codex_workspace).resolve()
+                if candidate.is_dir():
+                    directory = candidate
+            except (OSError, RuntimeError):
+                pass
+        identity = None
+        if directory is not None:
+            material = platform.node() + "\0" + os.path.normcase(str(directory))
+            identity = hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
+        ready, _ = self.available() if directory else (False, "")
+        name = (directory.name or "项目根目录") if directory else "未设置项目"
+        return {"id": identity, "name": name,
+                "configured": directory is not None, "available": ready,
+                "sandbox": self.settings.codex_sandbox, "approvals": "desktop-only"}
+
     @contextmanager
     def execution_directory(self):
         yield Path(self.settings.codex_workspace).resolve()
@@ -358,6 +380,8 @@ class PendingActions:
         item = {"id": uuid4().hex, "tool": name, "title": plugin.title,
                 "arguments": validated.model_dump(), "session_id": session_id,
                 "created": time.monotonic(), "created_at": datetime.now(timezone.utc).isoformat()}
+        if name == "codex_task":
+            item["workspace"] = plugin.workspace_status()
         self.items[item["id"]] = item
         return {key: value for key, value in item.items() if key != "created"}
 

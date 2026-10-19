@@ -1,5 +1,6 @@
 import hashlib
 import asyncio
+from dataclasses import replace
 import json
 from pathlib import Path
 import socket
@@ -8,6 +9,7 @@ from threading import Thread
 import time
 
 import httpx
+import pytest
 import uvicorn
 
 from assistant.config import Settings
@@ -142,6 +144,100 @@ def test_phone_codex_task_only_executes_after_desktop_confirmation(client_factor
     executed = events(client.post(f"/api/actions/{action['id']}/approve"))
     assert any('fixture: 检查项目结构' in event.get('text', '') for event in executed)
     assert 'fixture: 检查项目结构' in str(client.get(base + f'/sessions/{session}', headers=headers).json())
+
+
+def test_workspace_identity_shared_without_disclosing_full_path(client_factory, tmp_path):
+    project = tmp_path / 'private-parent' / 'my-project'
+    project.mkdir(parents=True)
+    client, _ = client_factory(settings=Settings(data_dir=str(tmp_path), mobile_enabled=True,
+                                                codex_workspace=str(project)))
+    client.app.state.codex.command_prefix = lambda: [sys.executable, str(Path(__file__).parent / 'fake_codex.py')]
+    headers = phone(client, pair(client)['token'])
+    base = 'https://phone.example/mobile/v1'
+    local = client.get('/api/workspace').json()
+    remote = client.get(base + '/workspace', headers=headers).json()
+    assert local == remote
+    assert local['configured'] and local['available']
+    assert local['name'] == 'my-project' and len(local['id']) == 32
+    assert local['sandbox'] == 'read-only' and local['approvals'] == 'desktop-only'
+    assert 'private-parent' not in str(remote) and str(project) not in str(remote)
+    assert client.get('/api/workspace', headers={'X-Assistant-Token': ''}).status_code == 403
+    assert client.get(base + '/workspace', headers=phone(client, 'invalid')).status_code == 401
+    assert client.post(base + '/workspace', headers=headers, json={'path': str(tmp_path)}).status_code == 403
+    original = client.app.state.codex.settings
+    client.app.state.codex.settings = replace(original, codex_workspace=str(project / '..' / 'my-project'))
+    assert client.get('/api/workspace').json()['id'] == local['id']
+    other = tmp_path / 'other-parent' / 'my-project'
+    other.mkdir(parents=True)
+    client.app.state.codex.settings = replace(original, codex_workspace=str(other))
+    assert client.get('/api/workspace').json()['id'] != local['id']
+
+
+def test_phone_instruction_writes_only_to_shared_project_after_local_approval(client_factory, tmp_path):
+    project = tmp_path / 'project'
+    project.mkdir()
+    client, _ = client_factory(settings=Settings(data_dir=str(tmp_path / 'data'), mobile_enabled=True,
+                                                codex_workspace=str(project), codex_sandbox='workspace-write'))
+    client.app.state.codex.command_prefix = lambda: [sys.executable, str(Path(__file__).parent / 'fake_codex.py')]
+    headers = phone(client, pair(client)['token'])
+    base = 'https://phone.example/mobile/v1'
+    workspace = client.get(base + '/workspace', headers=headers).json()
+    session = client.post(base + '/sessions', headers=headers).json()['id']
+    body = {'session_id': session, 'message': 'fixture-write-workspace', 'mode': 'codex'}
+    for invalid in ({'workspace_id': '0' * 32}, {'workspace_id': workspace['id'], 'mode': 'chat'}):
+        response = client.post(base + '/chat', headers=headers, json={**body, **invalid})
+        assert response.status_code in (409, 422)
+        assert not client.get(f'/api/sessions/{session}').json()['messages']
+        assert not client.get('/api/actions').json()
+    proposed = events(client.post(base + '/chat', headers=headers, json={**body, 'workspace_id': workspace['id']}))
+    action = next(event['action'] for event in proposed if event['type'] == 'action')
+    assert action['workspace'] == workspace
+    assert client.get('/api/actions').json()[0]['id'] == action['id']
+    marker = project / 'phone-result.txt'
+    assert not marker.exists()
+    assert client.post(base + f"/actions/{action['id']}/approve", headers=headers).status_code == 403
+    assert not marker.exists()
+    executed = events(client.post(f"/api/actions/{action['id']}/approve"))
+    assert executed[-1]['type'] == 'done'
+    assert marker.read_text(encoding='utf-8') == 'approved phone instruction'
+    assert not (tmp_path / 'phone-result.txt').exists()
+    assert client.get(base + f'/sessions/{session}', headers=headers).json() == client.get(f'/api/sessions/{session}').json()
+    assert client.post(f"/api/actions/{action['id']}/approve").status_code == 404
+
+
+@pytest.mark.parametrize('change', ['directory', 'sandbox', 'expired'])
+def test_pending_workspace_changes_or_expiry_never_execute(client_factory, tmp_path, change):
+    project = tmp_path / 'project'
+    project.mkdir()
+    settings = Settings(data_dir=str(tmp_path / 'data'), mobile_enabled=True,
+                        codex_workspace=str(project), codex_sandbox='workspace-write')
+    client, _ = client_factory(settings=settings)
+    client.app.state.codex.command_prefix = lambda: [sys.executable, str(Path(__file__).parent / 'fake_codex.py')]
+    headers = phone(client, pair(client)['token'])
+    base = 'https://phone.example/mobile/v1'
+    session = client.post(base + '/sessions', headers=headers).json()['id']
+    workspace = client.get(base + '/workspace', headers=headers).json()
+    proposed = events(client.post(base + '/chat', headers=headers, json={
+        'session_id': session, 'message': 'fixture-write-workspace', 'mode': 'codex', 'workspace_id': workspace['id']}))
+    action = next(event['action'] for event in proposed if event['type'] == 'action')
+    other = tmp_path / 'other'
+    other.mkdir()
+    if change == 'directory':
+        client.app.state.codex.settings = replace(settings, codex_workspace=str(other))
+    elif change == 'sandbox':
+        client.app.state.codex.settings = replace(settings, codex_sandbox='read-only')
+    else:
+        client.app.state.actions.items[action['id']]['created'] -= 121
+    response = client.post(f"/api/actions/{action['id']}/approve")
+    assert response.status_code == (404 if change == 'expired' else 409)
+    assert not (project / 'phone-result.txt').exists() and not (other / 'phone-result.txt').exists()
+
+
+def test_unconfigured_shared_workspace_is_not_ready(client_factory, tmp_path):
+    client = mobile_client(client_factory, tmp_path)
+    headers = phone(client, pair(client)['token'])
+    workspace = client.get('https://phone.example/mobile/v1/workspace', headers=headers).json()
+    assert workspace['id'] is None and not workspace['configured'] and not workspace['available']
 
 
 def test_gateway_forwards_text_before_stream_finishes(client_factory, tmp_path):

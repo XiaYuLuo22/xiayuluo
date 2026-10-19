@@ -71,7 +71,7 @@ def gateway(core, devices, token):
         device = devices.authenticate(authorization[7:]) if authorization.startswith("Bearer ") else None
         if not device:
             raise HTTPException(401, "设备未配对、已撤销或凭据已过期。")
-        allowed = {"GET": r"(?:sessions(?:/[a-f0-9]{32})?|memories|status|actions)",
+        allowed = {"GET": r"(?:sessions(?:/[a-f0-9]{32})?|memories|status|workspace|actions)",
                    "POST": r"(?:sessions|chat|memories|voice/(?:sessions|heartbeat|revoke))"}
         if not re.fullmatch(allowed.get(request.method, r"(?!)"), path):
             raise HTTPException(403, "手机无权执行此操作，请在电脑端确认。")

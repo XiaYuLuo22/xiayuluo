@@ -6,7 +6,7 @@ import { StatusBar } from 'expo-status-bar';
 import { UpdateCard } from './src/UpdateCard';
 import { VoiceCard, stopVoice } from './src/VoiceCard';
 import { Client, loadConnection, pairDevice, saveConnection, type Action, type Connection,
-  type Memory, type Message, type Session } from './src/client';
+  type Memory, type Message, type Session, type Workspace } from './src/client';
 
 type Tab = 'chat' | 'memory' | 'tasks' | 'devices';
 const tabs: [Tab, string, string][] = [['chat', '◌', '聊天'], ['memory', '▦', '记忆'], ['tasks', '◇', '任务'], ['devices', '⌁', '设备']];
@@ -26,6 +26,7 @@ function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [tasks, setTasks] = useState<Action[]>([]);
+  const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [history, setHistory] = useState(false);
   const [query, setQuery] = useState('');
   const [draft, setDraft] = useState('');
@@ -58,12 +59,14 @@ function Home() {
       pending = true;
       try {
         const client = new Client(connection);
-        const [sessionList, memoryList, actions, historyData] = await Promise.all([
+        const [sessionList, memoryList, actions, sharedWorkspace, historyData] = await Promise.all([
           client.json<Session[]>('sessions'), client.json<{ items: Memory[] }>('memories'),
-          client.json<Action[]>('actions'), selected ? client.json<{ messages: Message[] }>(`sessions/${selected}`) : null,
+          client.json<Action[]>('actions'), client.json<Workspace>('workspace'),
+          selected ? client.json<{ messages: Message[] }>(`sessions/${selected}`) : null,
         ]);
         if (!alive) return;
         setOnline(true); setSessions(sessionList); setMemories(memoryList.items); setTasks(actions);
+        setWorkspace(sharedWorkspace);
         if (historyData) setMessages(historyData.messages);
       } catch (error) { if (alive) { setOnline(false); setNotice(errorText(error)); } }
       finally { pending = false; }
@@ -87,13 +90,16 @@ function Home() {
     try {
       await stopVoice();
       await saveConnection(null); setConnection(null); setOnline(false); setSelected(null);
-      setMessages([]); setSessions([]); setMemories([]); setTasks([]); setDraft(''); setMemoryDraft('');
+      setMessages([]); setSessions([]); setMemories([]); setTasks([]); setWorkspace(null); setDraft(''); setMemoryDraft('');
       setNotice('已移除此手机的本地凭据。要彻底撤销访问，请同时在电脑设备页撤销设备。');
     } catch (error) { setNotice(errorText(error)); }
   }
   async function send() {
     if (busy || !draft.trim()) return;
     if (!connection || !online) { setNotice('请先在设备页配对并连接在线电脑。草稿暂留当前页面，不会自动发送。'); return; }
+    if (mode === 'codex' && (!workspace?.id || !workspace.available)) {
+      setNotice('电脑项目目录或 Codex CLI 未就绪。请先在电脑设置 CODEX_WORKSPACE、安装并登录官方 Codex，再刷新连接。'); return;
+    }
     const prompt = draft.trim(), client = new Client(connection);
     const abort = new AbortController(); controller.current = abort;
     setBusy(true); setNotice(''); let text = '';
@@ -103,7 +109,8 @@ function Home() {
       setSelected(session); setDraft('');
       setMessages(previous => [...previous, { id: targetId - 1, role: 'user', content: prompt },
         { id: targetId, role: 'assistant', content: '正在回应…' }]);
-      await client.stream({ session_id: session, message: prompt, mode }, abort.signal, packet => {
+      await client.stream({ session_id: session, message: prompt, mode,
+        ...(mode === 'codex' ? { workspace_id: workspace!.id } : {}) }, abort.signal, packet => {
         if (packet.type === 'text' && typeof packet.text === 'string') {
           text += packet.text;
           setMessages(previous => previous.map(item => item.id === targetId ? { ...item, content: text } : item));
@@ -152,6 +159,7 @@ function Home() {
         </View>} />
       <View style={s.composer}><TextInput style={s.prompt} value={draft} onChangeText={setDraft} multiline maxLength={12000}
         editable={!busy} accessibilityLabel="输入消息" placeholder="和夏鱼洛聊聊，或交给我一件事…" placeholderTextColor="#93a18e" />
+        {mode === 'codex' && <Text style={s.hint}>目标：{workspace?.name || '等待连接电脑'} · {workspace?.sandbox === 'workspace-write' ? '可修改项目，电脑逐次确认' : '只读检查'}</Text>}
         <View style={s.composerBar}><Pressable disabled={busy} onPress={() => setMode(mode === 'chat' ? 'codex' : 'chat')}><Text style={s.mode}>{mode === 'chat' ? '◌ 日常对话' : '⌘ Codex 编程'} ⌄</Text></Pressable>
           <Pressable accessibilityLabel={busy ? '停止回复' : '发送消息'} disabled={busy && !controller.current} style={s.send} onPress={() => busy ? controller.current?.abort() : void send()}><Text style={s.sendText}>{busy ? '■' : '↑'}</Text></Pressable></View>
       </View><Text style={s.caption}>回答可能有误 · 电脑工具执行前需在电脑确认</Text>
@@ -167,13 +175,21 @@ function Home() {
     </ScrollView>}
     {tab === 'tasks' && <ScrollView contentContainerStyle={s.page}><Text style={s.eyebrow}>COMPUTER TASKS</Text><Text style={s.title}>想法交给电脑完成</Text>
       <Text style={s.description}>手机提出任务，电脑核实后执行。{ '\n' }不会让手机直接操控鼠标或修改项目。</Text>
-      <Button label="提交 Codex 任务" onPress={() => { setMode('codex'); setTab('chat'); }} />
-      {tasks.map(task => <View key={task.id} style={s.card}><Text style={s.cardText}>{task.title}</Text><Text style={s.hint}>等待电脑确认 · 请求 2 分钟后过期</Text></View>)}
+      <WorkspaceCard workspace={workspace} online={online} />
+      <Button label="向电脑发送指令" disabled={busy} onPress={() => { setMode('codex'); setTab('chat'); }} />
+      {tasks.map(task => <View key={task.id} style={s.card}><Text style={s.cardText}>{task.title}</Text>
+        {task.workspace && <Text style={s.hint}>提交到：{task.workspace.name} · {task.workspace.sandbox === 'workspace-write' ? '项目可写' : '只读'}</Text>}
+        {task.tool === 'codex_task' && <Text selectable style={s.cardText}>{task.arguments.prompt?.slice(0, 320)}</Text>}
+        <Text style={s.hint}>等待电脑确认 · 请求 2 分钟后过期</Text>
+        <Button label="打开对应会话" disabled={busy} onPress={() => { setSelected(task.session_id); setMessages([]); setTab('chat'); }} />
+      </View>)}
+      <Text style={s.hint}>执行中和完成结果请查看原会话；待确认项消失不代表成功，也可能已取消或过期。电脑执行过程不在此实时直播。断线后先查看历史，不自动重发。</Text>
       {!tasks.length && <Text style={s.empty}>{online ? '暂时没有待确认任务' : '电脑离线时不执行任务'}</Text>}
     </ScrollView>}
     {tab === 'devices' && <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.page}>
       <Text style={s.eyebrow}>YOUR DEVICES</Text><Text style={s.title}>随身聊，接着做</Text>
       <Text style={s.description}>手机、电脑、开发者模式，共用同一份对话与四级记忆。仅与你主动配对的电脑连接。</Text>
+      <WorkspaceCard workspace={workspace} online={online} />
       <UpdateCard disabled={busy} />
       <VoiceCard connection={connection} disabled={busy} onSession={id => { if (!busy) { setSelected(id); setMessages([]); setTab('chat'); } }} />
       {connection ? <View style={s.card}><Text style={s.cardText}>{connection.name}</Text><Text selectable style={s.hint}>{connection.url}</Text>
@@ -196,6 +212,14 @@ function Home() {
         renderItem={({ item }) => <Pressable style={s.card} disabled={busy} onPress={() => { setMessages([]); setSelected(item.id); setHistory(false); setTab('chat'); }}><Text style={s.cardText}>{item.title}</Text></Pressable>} />
     </SafeAreaView></Modal>
   </SafeAreaView>;
+}
+function WorkspaceCard({ workspace, online }: { workspace: Workspace | null; online: boolean }) {
+  return <View style={s.card}><Text style={s.cardText}>共享电脑工作区 · {workspace?.name || '等待连接'}</Text>
+    <Text selectable style={s.hint}>编号：{workspace?.id || '未设置项目目录'}</Text>
+    <Text style={s.hint}>{!online ? '电脑未连接，显示的信息可能已过期。' : !workspace?.configured ? '请在电脑配置 CODEX_WORKSPACE，并重启服务。' : workspace.available ? '目录与 CLI 已找到；登录及额度需实际执行验证。' : 'Codex CLI 尚未就绪，请在电脑安装并登录。'}</Text>
+    <Text style={s.hint}>{workspace?.sandbox === 'workspace-write' ? '项目可写 · 电脑逐次确认后才能修改。' : '只读检查 · 不允许修改项目。'} 日常问答不读取此项目。</Text>
+    <Text style={s.hint}>与电脑「设备与同步」核对相同编号。手机不能更改电脑目录或执行权限。</Text>
+  </View>;
 }
 function Button({ label, onPress, disabled = false }: { label: string; onPress: () => void; disabled?: boolean }) {
   return <Pressable style={[s.button, disabled && { opacity: .45 }]} onPress={onPress} disabled={disabled}><Text style={s.buttonText}>{label}</Text></Pressable>;

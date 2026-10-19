@@ -128,6 +128,22 @@ def test_browser_streaming_memory_and_mobile_layout(page):
     playwright_api.expect(page.locator('#prompt')).to_be_visible()
 
 
+def test_browser_shared_workspace_and_bound_confirmation(page, browser_app):
+    _, app = browser_app
+    workspace = app.state.codex.workspace_status()
+    page.locator('[data-view="devices"]').click()
+    playwright_api.expect(page.locator('#shared-workspace-name')).to_contain_text(workspace['name'])
+    playwright_api.expect(page.locator('#shared-workspace-id')).to_contain_text(workspace['id'])
+    playwright_api.expect(page.locator('#shared-workspace-policy')).to_contain_text('只读检查')
+    page.locator('[data-view="chat"]').click()
+    page.locator('#mode-toggle').click()
+    page.locator('#prompt').fill('检查共享工作区')
+    page.locator('#send').click()
+    page.locator('.action-card button').click()
+    playwright_api.expect(page.locator('#action-details')).to_contain_text(workspace['id'])
+    playwright_api.expect(page.locator('#action-details')).to_contain_text('目录或权限改变后必须重新提交')
+
+
 def test_browser_desktop_requires_confirmation(page, browser_app):
     _, app = browser_app
     page.locator('[data-view="desktop"]').click()

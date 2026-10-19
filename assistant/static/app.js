@@ -341,7 +341,7 @@ async function sendMessage(event) {
 }
 
 function actionSummary(action) {
-  if (action.tool === 'codex_task') return `项目目录：${state.status.codex.workspace}\n沙箱：${state.status.codex.sandbox}\n\n任务：${action.arguments.prompt}`;
+  if (action.tool === 'codex_task') return `项目目录（当前配置）：${state.status.codex.workspace}\n提交工作区：${action.workspace?.name || '未设置'}\n工作区编号：${action.workspace?.id || '未设置'}\n提交沙箱：${action.workspace?.sandbox || state.status.codex.sandbox}\n目录或权限改变后必须重新提交。\n\n任务：${action.arguments.prompt}`;
   if (action.tool === 'desktop_click') return `主屏幕坐标：(${action.arguments.x}, ${action.arguments.y})\n按键：${action.arguments.button === 'right' ? '右键' : '左键'}\n截图 ID：${action.arguments.screenshot_id}`;
   if (action.tool === 'remember') return `层级：${tierName(action.arguments.tier)}\n类型：${kindName(action.arguments.kind)}\n\n${action.arguments.content}`;
   return JSON.stringify(action.arguments, null, 2);
@@ -502,7 +502,10 @@ async function renderTasks() {
   });
 }
 async function renderDevices() {
-  const devices = await json('/api/devices');
+  const [devices, workspace] = await Promise.all([json('/api/devices'), json('/api/workspace')]);
+  $('#shared-workspace-name').textContent = `项目：${workspace.name}`;
+  $('#shared-workspace-id').textContent = `工作区编号：${workspace.id || '请先设置 CODEX_WORKSPACE'}`;
+  $('#shared-workspace-policy').textContent = `${workspace.sandbox === 'workspace-write' ? '可修改指定项目，仍需逐次确认' : '只读检查，不允许修改项目'} · ${workspace.available ? 'CLI 已找到，登录与额度需实际执行验证' : '目录或 Codex CLI 尚未就绪'}`;
   $('#invite-device').disabled = !devices.enabled;
   $('#mobile-setup-note').textContent = devices.enabled ? '手机同步已启用。需要先配置 HTTPS 反向代理，仅发布 /mobile/ 路径；配置步骤见 MOBILE.md。' : '默认未开启。请在 .env 设置 MOBILE_ENABLED=true 并重启，再按 MOBILE.md 配置 HTTPS 连接。不要将本地 /api 接口发布到网络。';
   $('#device-list').replaceChildren();
