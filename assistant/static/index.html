@@ -89,26 +89,26 @@
       </section>
 
       <section id="view-desktop" class="view content-view" hidden>
-        <div class="page-heading"><div><div class="eyebrow">SCREEN ASSISTANT</div><h1>一起看看你的屏幕</h1><p>主动获取截图，选好位置，确认后帮你点击。</p></div><button id="capture-screen" class="primary-button">▱ 获取截图</button></div>
+        <div class="page-heading"><div><div class="eyebrow">SCREEN ASSISTANT</div><h1>一起看看你的屏幕</h1><p>主动获取截图，选好位置，按设置的执行方式点击。</p></div><button id="capture-screen" class="primary-button">▱ 获取截图</button></div>
         <div class="notice" id="desktop-notice"></div>
         <div class="screen-card"><div class="screen-toolbar"><span id="screen-dimensions">主屏幕 · 尚未截图</span><span class="mini-tag">APPROVAL REQUIRED</span></div><div id="screen-empty" class="screen-empty"><span>▱</span><h3>等待本机截图</h3><p>截图仅在本机展示。主动附到对话后，才会发送给模型。</p></div><div id="screen-container" class="screen-container" hidden><img id="screen-image" alt="本机主屏幕截图，点击图片可选择坐标"><span id="click-marker" class="click-marker" hidden>＋</span></div><div class="screen-footer"><span id="selected-position">先获取截图，再选择目标位置</span><div><button id="share-screen" class="secondary-button" disabled>附到对话</button><button id="request-click" class="primary-button" disabled>提出点击请求</button></div></div></div>
         <div class="info-grid"><article><span>01</span><h3>明确范围</h3><p>首版仅控制主屏幕，支持单次左键或右键点击。</p></article><article><span>02</span><h3>确认每一步</h3><p>执行前展示坐标；截图过期或目标变化时需重新选择。</p></article><article><span>03</span><h3>随时中止</h3><p>将鼠标移到主屏幕左上角可触发 PyAutoGUI 紧急停止。</p></article></div>
       </section>
 
       <section id="view-plugins" class="view content-view" hidden>
-        <div class="page-heading"><div><div class="eyebrow">TOOLBOX</div><h1>让想法变成行动</h1><p>编程、屏幕操作和记忆管理。更多能力可以继续扩展。</p></div><span class="badge">执行前需确认</span></div>
+        <div class="page-heading"><div><div class="eyebrow">TOOLBOX</div><h1>让想法变成行动</h1><p>编程、屏幕操作和记忆管理。更多能力可以继续扩展。</p></div><span id="execution-badge" class="badge">读取执行方式…</span></div>
         <div id="plugin-list" class="plugin-grid"></div>
         <div class="extension-note developer-only"><span>◇</span><div><h3>注册新能力</h3><p>在 assistant/tools.py 的 build_registry() 注册插件。参数校验、可用性检查和确认流程由统一接口承载。</p></div></div>
       </section>
 
       <section id="view-tasks" class="view content-view" hidden>
-        <div class="page-heading"><div><div class="eyebrow">APPROVALS</div><h1>每一步行动，由你确认</h1><p>手机和当前电脑提出的任务集中在这里。请求 2 分钟后过期，不会自动执行。</p></div><button id="refresh-tasks" class="secondary-button">刷新任务</button></div>
+        <div class="page-heading"><div><div class="eyebrow">APPROVALS</div><h1>任务与执行方式</h1><p id="task-policy">按电脑设置自动执行或逐次确认。旧待确认请求不会因切换设置而重放；结果回原会话查看。</p></div><button id="refresh-tasks" class="secondary-button">刷新任务</button></div>
         <div id="pending-tasks" class="memory-list"></div>
       </section>
       <section id="view-devices" class="view content-view" hidden>
         <div class="page-heading"><div><div class="eyebrow">YOUR DEVICES</div><h1>换个设备，接着聊</h1><p>手机、电脑和开发者模式共用当前电脑上的会话与四级记忆。</p></div><button id="refresh-devices" class="secondary-button">刷新设备</button></div>
-        <div class="settings-card"><h2>共享工作区</h2><p id="shared-workspace-name"></p><p id="shared-workspace-id"></p><p id="shared-workspace-policy"></p><p>在手机「任务」页核对同一编号。手机提交指令，本机「待确认任务」批准后执行；结果保存回原会话。完整项目目录仅在电脑显示。</p></div>
-        <div class="settings-card"><h2>手机配对</h2><p id="mobile-setup-note"></p><p>仅通过你配置的 HTTPS 服务连接，电脑需要保持在线。模型密钥和屏幕截图不向手机同步；Codex 和点击仅可在电脑确认执行。</p><button id="invite-device" class="primary-button">生成一次性配对邀请</button><div id="pair-invitation" hidden><p>在手机「设备」页输入你的 HTTPS 同步地址，并粘贴以下邀请。5 分钟有效，只能使用一次；请勿分享给他人。</p><textarea id="pair-code" readonly rows="2" aria-label="一次性配对邀请"></textarea></div></div>
+        <div class="settings-card"><h2>共享工作区</h2><p id="shared-workspace-name"></p><p id="shared-workspace-id"></p><p id="shared-workspace-policy"></p><p>在手机「任务」页核对同一编号。手机指令按电脑当前执行方式运行；结果保存回原会话。完整项目目录仅在电脑显示。</p></div>
+        <div class="settings-card"><h2>手机配对</h2><p id="mobile-setup-note"></p><p>仅通过你配置的 HTTPS 服务连接，电脑需要保持在线。模型密钥和屏幕截图不向手机同步；执行方式、目录及权限只能在电脑配置。自动模式下已配对手机可直接提交编程执行。</p><button id="invite-device" class="primary-button">生成一次性配对邀请</button><div id="pair-invitation" hidden><p>在手机「设备」页输入你的 HTTPS 同步地址，并粘贴以下邀请。5 分钟有效，只能使用一次；请勿分享给他人。</p><textarea id="pair-code" readonly rows="2" aria-label="一次性配对邀请"></textarea></div></div>
         <div id="device-list" class="memory-list"></div>
       </section>
       <section id="view-debug" class="view content-view" hidden>
@@ -119,11 +119,12 @@
       </section>
 
       <section id="view-settings" class="view content-view" hidden>
+        <div class="settings-card"><h2>执行方式</h2><label for="approval-mode">应用内确认</label> <select id="approval-mode"><option value="auto">默认同意 · 自动执行已配置工具</option><option value="manual">逐次确认</option></select><p id="automation-status" role="status"></p><p>自动模式会直接发送聊天上下文、执行指定项目的 Codex 任务、有效截图点击及用户要求的记忆保存。可能修改文件或发生不可撤回的点击。此授权仅针对本机已配置权限，不关闭沙箱或设备校验；操作仍可停止，已发生的变更不会撤回。麦克风默认关闭，点击开启后才监听。系统授权、账号登录和安装器提示仍由系统控制。</p></div>
         <div class="page-heading"><div><div class="eyebrow">SETTINGS</div><h1>你的助手，你的设置</h1><p>查看连接状态，管理隐私，按需开启开发者模式。</p></div><button id="refresh-status" class="secondary-button">刷新状态</button></div>
         <div class="settings-card preference-card"><div><h2>开发者模式</h2><p>显示运行指标、事件日志、工具参数和检查面板。默认关闭。</p></div><label class="switch"><input id="developer-mode" type="checkbox" role="switch" aria-label="开发者模式"><span aria-hidden="true"></span></label></div>
         <div id="settings-status" class="settings-status"></div>
-        <div class="settings-card"><h2>语音唤醒 · 夏鱼洛</h2><p id="voice-status" role="status" aria-live="polite">正在读取语音状态…</p><button id="voice-start" class="primary-button">开启语音唤醒</button> <button id="voice-stop" class="secondary-button">停止监听</button> <button id="voice-session" class="secondary-button" hidden>查看语音对话</button><p>默认关闭。Windows 本地离线识别，不保存或上传环境录音；开启时一次授权本次语音会话的 Codex 只读问答，停止即撤销，不使用付费 API。编程、鼠标和记忆操作仍需确认。最小化可继续，退出、睡眠或麦克风被占用会停止/中断。唤醒后 30 秒可连续说话；“结束对话”返回待唤醒，“停止监听”关闭麦克风。回答时暂停识别，暂不支持语音打断。先安装离线模型及系统中文朗读语音，详见 VOICE.md。</p></div>
-        <div class="settings-card"><h2>日常对话来源</h2><label for="chat-provider">选择连接方式</label> <select id="chat-provider"><option value="auto">自动：遵循电脑默认配置</option><option value="codex">Codex · ChatGPT 登录，无需 API 密钥</option><option value="api">模型 API · 单独配置密钥</option></select><p>Codex 方式调用电脑上的官方 CLI，不控制 Codex 桌面窗口、不提取登录令牌。近期会话及相关记忆经你确认后发送；首版逐次确认，不保证逐字输出，仍受会员额度限制。手机请求需到电脑确认。</p><p>先安装官方 <code>npm install -g @openai/codex</code>，再执行 <code>codex login</code> 并选择 ChatGPT 登录。仅安装桌面 Codex App 不代表已安装 CLI。普通问答不需要 CODEX_WORKSPACE；编程模式仍需指定项目目录。</p></div>
+        <div class="settings-card"><h2>语音唤醒 · 夏鱼洛</h2><p id="voice-status" role="status" aria-live="polite">正在读取语音状态…</p><button id="voice-start" class="primary-button">开启语音唤醒</button> <button id="voice-stop" class="secondary-button">停止监听</button> <button id="voice-session" class="secondary-button" hidden>查看语音对话</button><p>默认不开麦，点击开启才监听；自动模式不再额外弹应用确认，系统麦克风授权仍保留。Windows 本地离线识别，不保存或上传环境录音；唤醒后文字、上下文和相关记忆会发送给 Codex，可能增加耗电。语音通道仅只读问答，停止即撤销，不使用付费 API。其他操作请用对应入口，遵循当前执行方式。最小化可继续，退出、睡眠或麦克风被占用会停止/中断。唤醒后 30 秒可连续说话；“结束对话”返回待唤醒，“停止监听”关闭麦克风。回答时暂停识别，暂不支持语音打断。先安装离线模型及系统中文朗读语音，详见 VOICE.md。</p></div>
+        <div class="settings-card"><h2>日常对话来源</h2><label for="chat-provider">选择连接方式</label> <select id="chat-provider"><option value="auto">自动：遵循电脑默认配置</option><option value="codex">Codex · ChatGPT 登录，无需 API 密钥</option><option value="api">模型 API · 单独配置密钥</option></select><p>Codex 方式调用电脑上的官方 CLI，不控制 Codex 桌面窗口、不提取登录令牌。默认同意时，发送后直接把近期会话及相关记忆交给 Codex 回复；手机也无需到电脑逐轮确认。可在上方切回逐次确认。仍受会员额度限制，不保证逐字输出，不回退付费 API。</p><p>先安装官方 <code>npm install -g @openai/codex</code>，再执行 <code>codex login</code> 并选择 ChatGPT 登录。仅安装桌面 Codex App 不代表已安装 CLI。普通问答不需要 CODEX_WORKSPACE；编程模式仍需指定项目目录。</p></div>
         <div class="settings-card"><h2>版本与更新</h2><p id="update-status" role="status" aria-live="polite">点击检查已发布的新版本。更新需确认，不影响配置和四级记忆。</p><pre id="update-notes" hidden></pre><a id="download-update" class="primary-button download-update-link" href="https://github.com/XiaYuLuo22/xiayuluo/actions/workflows/windows-app.yml" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" role="button">↓ 下载更新</a> <button id="check-update" class="secondary-button">检查更新</button> <button id="install-update" class="primary-button" hidden>下载并重启更新</button><p id="download-update-note">私有仓库请在系统浏览器登录 GitHub，选择绿色成功构建，在 Artifacts 下载 Xiayuluo-Windows；尚无成功构建时没有安装包可下载。下载后手动解压更新，不代表已经安装。签名更新入口仍需先检测到有效新版本。</p></div>
         <details class="settings-card developer-only"><summary>当前运行元数据</summary><pre id="runtime-json"></pre></details>
         <details class="settings-card"><summary>连接模型与 Codex（首次使用）</summary><p>Codex 登录问答无需模型 API 密钥；使用 API 时才需在本机 .env 配置连接并重启。桌面原生菜单「夏鱼洛 → 打开配置目录」可找到此文件。模型密钥只写入本机，界面不会读取或展示它。</p><pre>CHAT_PROVIDER=auto

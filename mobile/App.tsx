@@ -40,6 +40,9 @@ function Home() {
   const [name, setName] = useState('我的手机');
   const controller = useRef<AbortController | null>(null);
   const list = useRef<FlatList<Message>>(null);
+  // New installs default to the owner's authorized automatic policy. Host-only
+  // operations still require an online paired connection and observed workspace.
+  const automatic = workspace?.approvals !== 'desktop-only';
 
   useEffect(() => {
     let alive = true;
@@ -126,14 +129,16 @@ function Home() {
   async function saveMemory() {
     if (!connection || !online || busy || !memoryDraft.trim() || tier === 'temporary') return;
     const content = memoryDraft.trim(), savedTier = tier;
+    const commit = () => {
+      setBusy(true);
+      new Client(connection).json('memories', { tier: savedTier, content, kind: 'fact' })
+        .then(() => { setMemoryDraft(''); setNotice('记忆已保存。'); }).catch(error => setNotice(errorText(error)))
+        .finally(() => setBusy(false));
+    };
+    if (automatic) { commit(); return; }
     Alert.alert(savedTier === 'permanent' ? '永久记住这件事？' : '保存这条记忆？',
       savedTier === 'permanent' ? '会一直保留，直到你手动调整或删除。请勿记录密钥。' : '保存到电脑，同步给已配对的端。', [
-        { text: '取消', style: 'cancel' }, { text: '确认保存', onPress: () => {
-          setBusy(true);
-          new Client(connection).json('memories', { tier: savedTier, content, kind: 'fact' })
-            .then(() => { setMemoryDraft(''); setNotice('记忆已保存。'); }).catch(error => setNotice(errorText(error)))
-            .finally(() => setBusy(false));
-        } },
+        { text: '取消', style: 'cancel' }, { text: '确认保存', onPress: commit },
       ]);
   }
 
@@ -159,10 +164,10 @@ function Home() {
         </View>} />
       <View style={s.composer}><TextInput style={s.prompt} value={draft} onChangeText={setDraft} multiline maxLength={12000}
         editable={!busy} accessibilityLabel="输入消息" placeholder="和夏鱼洛聊聊，或交给我一件事…" placeholderTextColor="#93a18e" />
-        {mode === 'codex' && <Text style={s.hint}>目标：{workspace?.name || '等待连接电脑'} · {workspace?.sandbox === 'workspace-write' ? '可修改项目，电脑逐次确认' : '只读检查'}</Text>}
+        {mode === 'codex' && <Text style={s.hint}>目标：{workspace?.name || '等待连接电脑'} · {workspace?.sandbox === 'workspace-write' ? '项目可写' : '只读检查'} · {automatic ? '发送后直接执行' : '电脑逐次确认'}</Text>}
         <View style={s.composerBar}><Pressable disabled={busy} onPress={() => setMode(mode === 'chat' ? 'codex' : 'chat')}><Text style={s.mode}>{mode === 'chat' ? '◌ 日常对话' : '⌘ Codex 编程'} ⌄</Text></Pressable>
           <Pressable accessibilityLabel={busy ? '停止回复' : '发送消息'} disabled={busy && !controller.current} style={s.send} onPress={() => busy ? controller.current?.abort() : void send()}><Text style={s.sendText}>{busy ? '■' : '↑'}</Text></Pressable></View>
-      </View><Text style={s.caption}>回答可能有误 · 电脑工具执行前需在电脑确认</Text>
+      </View><Text style={s.caption}>回答可能有误 · {automatic ? '已授权默认同意，执行后变更不会自动撤回' : '电脑工具执行前需在电脑确认'}</Text>
     </KeyboardAvoidingView>}
     {tab === 'memory' && <ScrollView contentContainerStyle={s.page}><Text style={s.eyebrow}>MEMORY</Text><Text style={s.title}>把重要的事留下</Text>
       <Text style={s.description}>四级记忆共享电脑上的同一份数据。{ '\n' }历史对话与永久记忆分开管理。</Text>
@@ -174,7 +179,7 @@ function Home() {
       {tier !== 'temporary' && !memories.some(item => item.tier === tier) && <Text style={s.empty}>{online ? '这一层还没有记忆' : '连接电脑后查看记忆'}</Text>}
     </ScrollView>}
     {tab === 'tasks' && <ScrollView contentContainerStyle={s.page}><Text style={s.eyebrow}>COMPUTER TASKS</Text><Text style={s.title}>想法交给电脑完成</Text>
-      <Text style={s.description}>手机提出任务，电脑核实后执行。{ '\n' }不会让手机直接操控鼠标或修改项目。</Text>
+      <Text style={s.description}>{automatic ? '手机发送指令，电脑按已配置权限直接执行，不再逐条确认。' : '手机提出任务，电脑核实后执行。'}{ '\n' }项目和权限仍由电脑配置；手机不能获取截图或修改权限。</Text>
       <WorkspaceCard workspace={workspace} online={online} />
       <Button label="向电脑发送指令" disabled={busy} onPress={() => { setMode('codex'); setTab('chat'); }} />
       {tasks.map(task => <View key={task.id} style={s.card}><Text style={s.cardText}>{task.title}</Text>
@@ -190,11 +195,11 @@ function Home() {
       <Text style={s.eyebrow}>YOUR DEVICES</Text><Text style={s.title}>随身聊，接着做</Text>
       <Text style={s.description}>手机、电脑、开发者模式，共用同一份对话与四级记忆。仅与你主动配对的电脑连接。</Text>
       <WorkspaceCard workspace={workspace} online={online} />
-      <UpdateCard disabled={busy} />
-      <VoiceCard connection={connection} disabled={busy} onSession={id => { if (!busy) { setSelected(id); setMessages([]); setTab('chat'); } }} />
+      <UpdateCard disabled={busy} automatic={automatic} />
+      <VoiceCard connection={connection} disabled={busy} automatic={automatic} onSession={id => { if (!busy) { setSelected(id); setMessages([]); setTab('chat'); } }} />
       {connection ? <View style={s.card}><Text style={s.cardText}>{connection.name}</Text><Text selectable style={s.hint}>{connection.url}</Text>
         <Text style={s.hint}>凭据保存在系统安全存储，不同步模型密钥。解除本机配对不会删除电脑数据。</Text>
-        <Button label="解除本机配对" disabled={busy} onPress={() => Alert.alert('解除配对？', '清除此手机凭据。电脑中可另行撤销访问权限。', [{ text: '取消' }, { text: '解除', style: 'destructive', onPress: () => void disconnect() }])} /></View> : <View style={s.card}>
+        <Button label="解除本机配对" disabled={busy} onPress={() => automatic ? void disconnect() : Alert.alert('解除配对？', '清除此手机凭据。电脑中可另行撤销访问权限。', [{ text: '取消' }, { text: '解除', style: 'destructive', onPress: () => void disconnect() }])} /></View> : <View style={s.card}>
         <Text style={s.cardText}>连接你的电脑</Text><Text style={s.hint}>先在电脑「设备与同步」生成 5 分钟有效的一次性配对邀请。同步服务需要 HTTPS，不能直接填写电脑的 localhost。</Text>
         <TextInput style={s.input} value={url} onChangeText={setUrl} placeholder="https://你的同步服务域名" autoCapitalize="none" autoCorrect={false} keyboardType="url" accessibilityLabel="同步服务地址" />
         <TextInput style={s.input} value={name} onChangeText={setName} placeholder="手机名称" maxLength={60} accessibilityLabel="手机名称" />
@@ -217,7 +222,7 @@ function WorkspaceCard({ workspace, online }: { workspace: Workspace | null; onl
   return <View style={s.card}><Text style={s.cardText}>共享电脑工作区 · {workspace?.name || '等待连接'}</Text>
     <Text selectable style={s.hint}>编号：{workspace?.id || '未设置项目目录'}</Text>
     <Text style={s.hint}>{!online ? '电脑未连接，显示的信息可能已过期。' : !workspace?.configured ? '请在电脑配置 CODEX_WORKSPACE，并重启服务。' : workspace.available ? '目录与 CLI 已找到；登录及额度需实际执行验证。' : 'Codex CLI 尚未就绪，请在电脑安装并登录。'}</Text>
-    <Text style={s.hint}>{workspace?.sandbox === 'workspace-write' ? '项目可写 · 电脑逐次确认后才能修改。' : '只读检查 · 不允许修改项目。'} 日常问答不读取此项目。</Text>
+    <Text style={s.hint}>{workspace?.sandbox === 'workspace-write' ? '项目可写。' : '只读检查 · 不允许修改项目。'} {workspace?.approvals === 'automatic' ? '默认同意，指令直接执行；可在电脑设置改回逐次确认。' : '电脑逐次确认。'} 日常问答不读取此项目。</Text>
     <Text style={s.hint}>与电脑「设备与同步」核对相同编号。手机不能更改电脑目录或执行权限。</Text>
   </View>;
 }

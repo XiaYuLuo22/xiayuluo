@@ -68,7 +68,7 @@ def browser_app(tmp_path):
         prompt = json.loads(request.content)['messages'][-1]['content']
         parts = ['## 功能检查\n\n', MARKDOWN_SAMPLE[len('## 功能检查\n\n'):]] if '展示排版测试' in prompt else None
         return httpx.Response(200, stream=SlowModelStream(parts), headers={'Content-Type': 'text/event-stream'})
-    app = create_app(Settings(api_key='fixture-only', data_dir=str(tmp_path), codex_workspace=str(tmp_path)),
+    app = create_app(Settings(api_key='fixture-only', data_dir=str(tmp_path), codex_workspace=str(tmp_path), approval_mode='manual'),
                      transport=httpx.MockTransport(handler))
     app.state.desktop.enabled = True
     app.state.desktop.driver = FakeDesktop()
@@ -142,6 +142,39 @@ def test_browser_shared_workspace_and_bound_confirmation(page, browser_app):
     page.locator('.action-card button').click()
     playwright_api.expect(page.locator('#action-details')).to_contain_text(workspace['id'])
     playwright_api.expect(page.locator('#action-details')).to_contain_text('目录或权限改变后必须重新提交')
+
+
+def test_browser_auto_mode_direct_chat_and_click_without_dialog(page, browser_app):
+    _, app = browser_app
+    dialogs = []
+    page.on('dialog', lambda dialog: (dialogs.append(dialog.message), dialog.dismiss()))
+    page.locator('[data-view="settings"]').click()
+    page.locator('#approval-mode').select_option('auto')
+    playwright_api.expect(page.locator('#automation-status')).to_contain_text('已授权默认同意')
+    page.locator('#chat-provider').select_option('codex')
+    playwright_api.expect(page.locator('#model-status')).to_contain_text('发送后直接调用')
+    page.locator('[data-view="chat"]').click()
+    page.locator('#prompt').fill('好久不见')
+    page.locator('#send').click()
+    playwright_api.expect(page.locator('.message.assistant .message-body').last).to_contain_text('chat fixture: 好久不见')
+    playwright_api.expect(page.locator('#stop')).to_be_hidden()
+    assert page.locator('.action-card').count() == 0
+    playwright_api.expect(page.locator('#action-dialog')).not_to_be_visible()
+    page.locator('[data-view="desktop"]').click()
+    page.locator('#capture-screen').click()
+    playwright_api.expect(page.locator('#screen-image')).to_be_visible()
+    page.locator('#screen-image').click(position={'x': 40, 'y': 40})
+    page.locator('#request-click').click()
+    playwright_api.expect(page.locator('.message.assistant .message-body').last).to_contain_text('已执行左键点击')
+    assert len(app.state.desktop.driver.clicks) == 1
+    assert not dialogs
+    playwright_api.expect(page.locator('#action-dialog')).not_to_be_visible()
+    page.locator('[data-view="settings"]').click()
+    page.reload()
+    page.locator('[data-view="settings"]').click()
+    playwright_api.expect(page.locator('#approval-mode')).to_have_value('auto')
+    page.locator('#approval-mode').select_option('manual')
+    playwright_api.expect(page.locator('#automation-status')).to_contain_text('当前逐次确认')
 
 
 def test_browser_desktop_requires_confirmation(page, browser_app):

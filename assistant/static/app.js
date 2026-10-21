@@ -50,6 +50,8 @@ async function api(path, options = {}) {
 }
 const json = async (path, options) => (await api(path, options)).json();
 const post = (path, body = {}) => json(path, { method: 'POST', body: JSON.stringify(body) });
+const automaticMode = () => state.status?.automation?.mode === 'auto';
+const approveLocally = (text) => automaticMode() || confirm(text);
 
 let updateBusy = false;
 let voiceSession = null;
@@ -64,7 +66,7 @@ async function refreshVoice() {
   } catch { $('#voice-status').textContent = '无法读取语音状态，请重新打开 App。'; }
 }
 $('#voice-start').addEventListener('click', guarded(async () => {
-  if (!confirm('开启本地麦克风持续监听“夏鱼洛”，并一次授权本次语音会话的 Codex 只读问答？\n最小化后仍运行，可能增加耗电；唤醒后的文字、近期上下文和相关记忆会发送到官方 Codex CLI，进入会话/记忆。不上传或保存环境录音，不使用付费 API。仅普通问答免逐轮确认；编程、鼠标和记忆操作仍需确认。停止监听即撤销，退出 App 即停止。')) return;
+  if (!approveLocally('开启本地麦克风持续监听“夏鱼洛”，并授权本次语音会话的 Codex 只读问答？\n最小化后仍运行，可能增加耗电；唤醒后的文字、近期上下文和相关记忆会发送到官方 Codex CLI，进入会话/记忆。不上传或保存环境录音，不使用付费 API。语音通道仅普通问答；编程、鼠标和记忆操作请用其他入口，遵循本机执行策略。停止监听即撤销，退出 App 即停止。')) return;
   await post('/api/voice/start', { confirm: true }); await refreshVoice();
 }));
 $('#voice-stop').addEventListener('click', guarded(async () => {
@@ -100,7 +102,7 @@ $('#check-update').addEventListener('click', async () => {
 });
 $('#install-update').addEventListener('click', async () => {
   if (updateBusy || state.busy) return toast('请先完成或停止当前任务。');
-  if (!confirm('下载并校验新版本，然后退出并重启夏鱼洛？配置、聊天和四级记忆保留，安装位置不变。')) return;
+  if (!approveLocally('下载并校验新版本，然后退出并重启夏鱼洛？配置、聊天和四级记忆保留，安装位置不变。')) return;
   updateBusy = true; $('#install-update').disabled = true; $('#check-update').disabled = true;
   $('#update-status').textContent = '正在下载并校验，请勿关闭 App；完成后自动重启…';
   try { await post('/api/updates/install', { confirm: true }); $('#update-status').textContent = '校验通过，正在重启安装…'; }
@@ -111,7 +113,7 @@ $('#install-update').addEventListener('click', async () => {
 function setMode(mode) {
   state.mode = mode;
   $('#mode-toggle').replaceChildren(document.createTextNode(mode === 'codex' ? '⌘ Codex 编程 ' : '◌ 日常对话 '), el('span', '', '⌄'));
-  $('#prompt').placeholder = mode === 'codex' ? '描述编程任务，确认后交给本机 Codex…' : '和夏鱼洛聊聊，或交给我一件事…';
+  $('#prompt').placeholder = mode === 'codex' ? (automaticMode() ? '描述编程任务，发送后交给本机 Codex…' : '描述编程任务，确认后交给本机 Codex…') : '和夏鱼洛聊聊，或交给我一件事…';
   if (state.status) debug.runtime(state.status, state.session, mode);
 }
 async function openView(view) {
@@ -206,7 +208,12 @@ async function refreshStatus() {
   const status = state.status;
   const source = state.provider === 'auto' ? status.model.provider : state.provider;
   const ready = source === 'codex' ? status.model.codex_chat_available : status.model.api_configured;
-  $('#model-status').textContent = ready ? (source === 'codex' ? 'Codex · 已找到 CLI，发送后确认' : `${status.model.api_name} · API 已配置`) : (source === 'codex' ? '请安装并登录官方 Codex CLI' : 'API 待配置');
+  $('#model-status').textContent = ready ? (source === 'codex' ? `Codex · 已找到 CLI，${automaticMode() ? '发送后直接调用' : '发送后确认'}` : `${status.model.api_name} · API 已配置`) : (source === 'codex' ? '请安装并登录官方 Codex CLI' : 'API 待配置');
+  $('#approval-mode').value = status.automation.mode;
+  $('#automation-status').textContent = status.automation.warning || (automaticMode() ? '已授权默认同意：发送后直接执行，不逐次弹窗；切换设置不会重放旧请求。' : '当前逐次确认：工具请求等待你在电脑批准。');
+  $('#execution-badge').textContent = automaticMode() ? '默认同意 · 自动执行' : '执行前需确认';
+  $('#view-desktop .mini-tag').textContent = automaticMode() ? 'AUTO EXECUTION' : 'APPROVAL REQUIRED';
+  $('#task-policy').textContent = automaticMode() ? '自动模式：新指令直接执行，结果在原会话显示。旧待确认请求不会自动重放，可在此单独处理或取消。' : '手机和当前电脑的请求在这里等待确认，2 分钟过期，不自动执行。';
   $('#model-dot').classList.toggle('off', !ready);
   $('#connection-hint').hidden = ready;
   $('#desktop-notice').textContent = status.desktop.available ? '本机桌面驱动可用。截图有效期为 2 分钟；点击确认前会校验目标区域。请勿在运行点击时移动窗口。' : status.desktop.reason;
@@ -248,7 +255,7 @@ function renderSessions() {
     const remove = el('button', 'session-delete', '×'); remove.setAttribute('aria-label', `删除对话：${session.title}`);
     remove.addEventListener('click', guarded(async () => {
       if (state.busy) return toast('请先等待任务完成或停止。');
-      if (!confirm('删除这段对话及从它产生的记忆？手动另存的记忆会保留。')) return;
+      if (!approveLocally('删除这段对话及从它产生的记忆？手动另存的记忆会保留。')) return;
       await json(`/api/sessions/${session.id}`, { method: 'DELETE' });
       if (state.session === session.id) { state.session = null; resetChat(); }
       await refreshSessions(); await refreshStatus();
@@ -353,6 +360,12 @@ function addActionCard(holder, action) {
 }
 async function showAction(action, button = null) {
   if (state.busy) return toast('请等待当前请求完成后再确认。');
+  if (automaticMode()) {
+    if (button) { button.disabled = true; button.textContent = '自动执行中'; }
+    await loadSession(action.session_id);
+    await consumeStream(`/api/actions/${action.id}/approve`, {}, message('assistant'));
+    return;
+  }
   state.action = { ...action, button };
   debug.record('tool', `${action.tool} · confirmation opened`, { action });
   $('#action-title').textContent = `确认${action.title}`;
@@ -405,7 +418,7 @@ async function renderMemories() {
     const tools = el('div');
     if (item.tier !== 'permanent') {
       const permanent = el('button', '', '设为永久'); permanent.addEventListener('click', guarded(async () => {
-        if (!confirm('将这条记忆设为永久？它将一直参与检索，直到你删除或调整层级。')) return;
+        if (!approveLocally('将这条记忆设为永久？它将一直参与检索，直到你删除或调整层级。')) return;
         await json(`/api/memories/${item.id}`, { method: 'PATCH', body: JSON.stringify({ tier: 'permanent' }) }); await renderMemories();
       })); tools.append(permanent);
     } else {
@@ -414,7 +427,7 @@ async function renderMemories() {
       })); tools.append(demote);
     }
     const remove = el('button', 'danger', '删除'); remove.addEventListener('click', guarded(async () => {
-      if (!confirm('删除这条记忆？')) return;
+      if (!approveLocally('删除这条记忆？')) return;
       await json(`/api/memories/${item.id}`, { method: 'DELETE' }); await renderMemories();
     })); tools.append(remove); footer.append(tools);
     card.append(top, el('p', '', item.content), footer); $('#memory-list').append(card);
@@ -463,7 +476,7 @@ function renderPlugins() {
     schema.append(el('summary', '', 'Parameters / JSON Schema'), el('pre', '', JSON.stringify(plugin.parameters, null, 2)));
     card.append(schema);
     if (!plugin.available) card.append(el('small', '', plugin.reason));
-    const footer = el('footer'); footer.append(el('span', '', plugin.available ? '● 已连接 · 需确认' : '○ 尚未连接'));
+    const footer = el('footer'); footer.append(el('span', '', plugin.available ? `● 已连接 · ${automaticMode() ? '默认同意' : '需确认'}` : '○ 尚未连接'));
     const button = el('button', 'text-button', plugin.name === 'desktop_click' ? '打开桌面 ↗' : plugin.name === 'codex_task' ? '开始任务 ↗' : plugin.name === 'remember' ? '管理记忆 ↗' : '提出请求 ↗');
     button.addEventListener('click', guarded(async () => {
       if (plugin.name === 'desktop_click') return openView('desktop');
@@ -482,9 +495,9 @@ function renderSettings() {
   const status = state.status; $('#settings-status').replaceChildren();
   const source = state.provider === 'auto' ? status.model.provider : state.provider;
   const sourceReady = source === 'codex' ? status.model.codex_chat_available : status.model.api_configured;
-  [{ title: '日常对话', ready: sourceReady, detail: sourceReady ? (source === 'codex' ? 'Codex · CLI 已找到，ChatGPT 登录与会员额度需实际调用验证；逐次确认。' : `${status.model.api_name} · API 配置存在，连接需实际调用验证。`) : '尚未连接，请选择 Codex 登录问答，或配置模型 API。' },
+  [{ title: '日常对话', ready: sourceReady, detail: sourceReady ? (source === 'codex' ? `Codex · CLI 已找到，ChatGPT 登录与会员额度需实际调用验证；${automaticMode() ? '发送即调用。' : '逐次确认。'}` : `${status.model.api_name} · API 配置存在，连接需实际调用验证。`) : '尚未连接，请选择 Codex 登录问答，或配置模型 API。' },
     { title: 'Codex 编程（可选）', ready: status.codex.available, detail: status.codex.available ? `${status.codex.workspace} · ${status.codex.sandbox} · ${status.codex.reason}` : status.codex.reason },
-    { title: '桌面驱动', ready: status.desktop.available, detail: status.desktop.available ? '主屏幕截图与鼠标点击可用，需用户确认' : status.desktop.reason }].forEach((item) => {
+    { title: '桌面驱动', ready: status.desktop.available, detail: status.desktop.available ? `主屏幕截图与鼠标点击可用，${automaticMode() ? '按授权自动执行' : '需用户确认'}` : status.desktop.reason }].forEach((item) => {
     const row = el('div', 'connection-row'); const info = el('div'); info.append(el('strong', '', item.title), el('small', '', item.detail));
     row.append(el('span', `status-dot${item.ready ? '' : ' off'}`), info); $('#settings-status').append(row);
   });
@@ -505,7 +518,7 @@ async function renderDevices() {
   const [devices, workspace] = await Promise.all([json('/api/devices'), json('/api/workspace')]);
   $('#shared-workspace-name').textContent = `项目：${workspace.name}`;
   $('#shared-workspace-id').textContent = `工作区编号：${workspace.id || '请先设置 CODEX_WORKSPACE'}`;
-  $('#shared-workspace-policy').textContent = `${workspace.sandbox === 'workspace-write' ? '可修改指定项目，仍需逐次确认' : '只读检查，不允许修改项目'} · ${workspace.available ? 'CLI 已找到，登录与额度需实际执行验证' : '目录或 Codex CLI 尚未就绪'}`;
+  $('#shared-workspace-policy').textContent = `${workspace.sandbox === 'workspace-write' ? '可修改指定项目' : '只读检查，不允许修改项目'} · ${workspace.approvals === 'automatic' ? '默认同意，指令直接执行' : '电脑逐次确认'} · ${workspace.available ? 'CLI 已找到，登录与额度需实际执行验证' : '目录或 Codex CLI 尚未就绪'}`;
   $('#invite-device').disabled = !devices.enabled;
   $('#mobile-setup-note').textContent = devices.enabled ? '手机同步已启用。需要先配置 HTTPS 反向代理，仅发布 /mobile/ 路径；配置步骤见 MOBILE.md。' : '默认未开启。请在 .env 设置 MOBILE_ENABLED=true 并重启，再按 MOBILE.md 配置 HTTPS 连接。不要将本地 /api 接口发布到网络。';
   $('#device-list').replaceChildren();
@@ -516,7 +529,7 @@ async function renderDevices() {
     if (!device.revoked) {
       const button = el('button', 'text-button danger', '撤销这台设备');
       button.addEventListener('click', guarded(async () => {
-        if (!confirm('撤销后，这台手机不能继续发起请求；已开始的任务不会自动撤回。')) return;
+        if (!approveLocally('撤销后，这台手机不能继续发起请求；已开始的任务不会自动撤回。')) return;
         await json(`/api/devices/${device.id}`, { method: 'DELETE' }); await renderDevices();
       })); card.append(button);
     }
@@ -576,6 +589,12 @@ try {
   if (['auto', 'api', 'codex'].includes(selected)) state.provider = selected;
 } catch { /* Defaults work with private storage disabled. */ }
 $('#chat-provider').value = state.provider;
+$('#approval-mode').addEventListener('change', guarded(async event => {
+  const mode = event.target.value;
+  if (state.busy) { $('#approval-mode').value = state.status.automation.mode; return toast('请先完成或停止当前任务。'); }
+  try { await post('/api/automation', { mode }); }
+  finally { await refreshStatus(); }
+}));
 $('#chat-provider').addEventListener('change', guarded(async event => {
   if (state.busy) { $('#chat-provider').value = state.provider; return toast('请先完成当前回复。'); }
   state.provider = event.target.value;
@@ -607,7 +626,7 @@ $('#memory-form').addEventListener('submit', guarded(async (event) => {
 }));
 $('#clear-memory').addEventListener('click', guarded(async () => {
   if (state.busy) return toast('请先停止正在执行的任务。');
-  if (!confirm('清空所有层级的记忆及全部历史对话？此操作无法撤销。')) return;
+  if (!approveLocally('清空所有层级的记忆及全部历史对话？此操作无法撤销。')) return;
   await json('/api/memories', { method: 'DELETE' }); state.session = null; resetChat();
   await refreshSessions(); await renderMemories(); toast('所有记忆及历史对话已清空。');
 }));

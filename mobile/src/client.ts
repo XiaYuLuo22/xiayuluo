@@ -8,7 +8,7 @@ export type Session = { id: string; title: string };
 export type Message = { id: number; role: string; content: string };
 export type Memory = { id: string; tier: string; content: string; expires_at: string | null };
 export type Workspace = { id: string | null; name: string; configured: boolean; available: boolean;
-  sandbox: 'read-only' | 'workspace-write'; approvals: 'desktop-only' };
+  sandbox: 'read-only' | 'workspace-write'; approvals: 'desktop-only' | 'automatic' };
 export type Action = { id: string; title: string; session_id: string; created_at: string;
   tool: string; arguments: { prompt?: string }; workspace?: Workspace };
 const storageKey = 'xiayuluo.connection.v1';

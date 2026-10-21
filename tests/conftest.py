@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 
 from fastapi.testclient import TestClient
 import httpx
@@ -26,13 +27,16 @@ def store(tmp_path):
 @pytest.fixture
 def client_factory(tmp_path):
     clients = []
-    def build(stream=None, settings=None, handler=None):
+    def build(stream=None, settings=None, handler=None, approval_mode="manual"):
         records = []
         def default_handler(request):
             records.append(json.loads(request.content))
             return httpx.Response(200, text=stream or model_stream({"content": "你好"}, {"content": "，一起开始吧。"}),
                                   headers={"Content-Type": "text/event-stream"})
         settings = settings or Settings(api_key="test-only-key", data_dir=str(tmp_path))
+        # Existing confirmation tests explicitly exercise manual mode; automatic
+        # coverage opts in below, separately asserting the production default.
+        settings = replace(settings, approval_mode=approval_mode)
         app = create_app(settings, transport=httpx.MockTransport(handler or default_handler))
         client = TestClient(app, base_url="http://localhost")
         client.__enter__()

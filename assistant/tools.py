@@ -115,7 +115,7 @@ class Desktop:
 class DesktopClick:
     name = "desktop_click"
     title = "屏幕点击"
-    description = "在用户提供的主屏幕截图上点击指定像素坐标。必须提供该截图的 screenshot_id；每次点击都需用户确认。"
+    description = "在用户提供的主屏幕截图上点击指定像素坐标，按本机执行策略运行。必须提供该截图的 screenshot_id。"
     arguments = ClickArguments
 
     def __init__(self, desktop):
@@ -131,7 +131,7 @@ class DesktopClick:
 class Remember:
     name = "remember"
     title = "长期记忆"
-    description = "提出保存用户明确表达的事实/偏好或方法。二级记忆保留30天，永久记忆不自动过期；两者均需用户确认。不得保存猜测或敏感凭据。"
+    description = "保存用户明确表达并要求记住的事实/偏好或方法，按本机执行策略运行。二级记忆保留30天，永久记忆不自动过期。不得保存猜测或敏感凭据。"
     arguments = RememberArguments
 
     def __init__(self, memory):
@@ -174,11 +174,12 @@ async def stop_owned_process(process):
 class Codex:
     name = "codex_task"
     title = "Codex 编程"
-    description = "向本机 Codex CLI 提交编程任务，在固定配置的项目目录执行；需用户确认。"
+    description = "向本机 Codex CLI 提交编程任务，在固定配置的项目目录与沙箱内按执行策略运行。"
     arguments = CodexArguments
 
     def __init__(self, settings):
         self.settings = settings
+        self.approval_mode = settings.approval_mode
         self.lock = asyncio.Lock()
 
     def command_prefix(self):
@@ -221,7 +222,8 @@ class Codex:
         name = (directory.name or "项目根目录") if directory else "未设置项目"
         return {"id": identity, "name": name,
                 "configured": directory is not None, "available": ready,
-                "sandbox": self.settings.codex_sandbox, "approvals": "desktop-only"}
+                "sandbox": self.settings.codex_sandbox,
+                "approvals": "automatic" if self.approval_mode == "auto" else "desktop-only"}
 
     @contextmanager
     def execution_directory(self):
@@ -304,7 +306,7 @@ class Codex:
 class CodexChat(Codex):
     name = "codex_chat"
     title = "Codex 日常问答（ChatGPT 登录）"
-    description = "经用户确认后，将近期会话和相关记忆发送给官方 Codex CLI；只读问答，不使用模型 API 密钥。"
+    description = "按本机执行策略，将近期会话和相关记忆发送给官方 Codex CLI；只读问答，不使用模型 API 密钥。"
     arguments = CodexChatArguments
 
     def available(self):

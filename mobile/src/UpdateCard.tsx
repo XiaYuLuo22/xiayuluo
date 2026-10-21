@@ -5,7 +5,7 @@ import type { Release } from './updateProtocol';
 import config from './update-config.json';
 import { downloadPage } from './downloadLinks';
 
-export function UpdateCard({ disabled }: { disabled: boolean }) {
+export function UpdateCard({ disabled, automatic }: { disabled: boolean; automatic: boolean }) {
   const [release, setRelease] = useState<Release | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(`当前版本 ${currentVersion}。电脑离线也可检查已发布的更新。`);
@@ -21,6 +21,7 @@ export function UpdateCard({ disabled }: { disabled: boolean }) {
   }
   function install() {
     if (!release || busy || disabled) return;
+    if (automatic) { void performInstall(release); return; }
     Alert.alert(`更新到 ${release.version}？`, '下载并校验后打开系统安装器。需要你确认安装，不要卸载旧版，配对与电脑记忆会保留。', [
       { text: '取消', style: 'cancel' }, { text: '下载更新', onPress: () => {
         setBusy(true);
@@ -29,6 +30,12 @@ export function UpdateCard({ disabled }: { disabled: boolean }) {
           .finally(() => setBusy(false));
       } },
     ]);
+  }
+  async function performInstall(target: Release) {
+    setBusy(true);
+    try { await installUpdate(target, setMessage); }
+    catch (error) { setMessage(error instanceof Error ? error.message : '更新未完成，当前版本保留。'); }
+    finally { setBusy(false); }
   }
   async function download() {
     if (busy || disabled) return;

@@ -40,7 +40,7 @@ class Forward(Response):
         await self.core(forwarded, replay, send)
 
 
-def gateway(core, devices, token):
+def gateway(core, devices, token, automation):
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.middleware("http")
@@ -78,7 +78,8 @@ def gateway(core, devices, token):
         if path == "status":
             # Exclude filesystem paths, provider URL, plugin schemas and local auth token.
             return {"device": {"id": device["id"], "name": device["name"]},
-                    "online": True, "sync_mode": "computer-authority", "approvals": "desktop-only"}
+                    "online": True, "sync_mode": "computer-authority",
+                    "approvals": "automatic" if automation.automatic else "desktop-only"}
         body = None
         if path == "chat":
             body = await request.body()
@@ -94,9 +95,9 @@ def gateway(core, devices, token):
 
 
 class MobileAccess:
-    def __init__(self, app, *, devices, token):
+    def __init__(self, app, *, devices, token, automation):
         self.app = app
-        self.gateway = gateway(app, devices, token) if devices else None
+        self.gateway = gateway(app, devices, token, automation) if devices else None
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http" and (scope["path"] == "/mobile" or scope["path"].startswith("/mobile/")):
