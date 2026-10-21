@@ -55,9 +55,14 @@ const approveLocally = (text) => automaticMode() || confirm(text);
 
 let updateBusy = false;
 let voiceSession = null;
+let voiceRunning = false;
 async function refreshVoice() {
   try {
     const info = await json('/api/voice');
+    voiceRunning = !!info.running;
+    $('#voice-indicator').textContent = info.running ? '🎙' : '◌';
+    $('#voice-indicator').title = `${info.running ? '点击停止监听 · ' : ''}${info.message || info.reason || '语音未运行'}`;
+    $('#voice-indicator').setAttribute('aria-label', `${info.running ? '停止监听' : '语音状态'}：${info.message || info.reason || '未运行'}`);
     $('#voice-status').textContent = `${info.message || ''} ${info.available ? '' : info.reason || ''}`;
     $('#voice-start').disabled = !info.available || info.running;
     $('#voice-stop').disabled = !info.running;
@@ -71,6 +76,10 @@ $('#voice-start').addEventListener('click', guarded(async () => {
 }));
 $('#voice-stop').addEventListener('click', guarded(async () => {
   await post('/api/voice/stop'); await refreshVoice();
+}));
+$('#voice-indicator').addEventListener('click', guarded(async () => {
+  if (voiceRunning) { await post('/api/voice/stop'); await refreshVoice(); }
+  else await openView('settings');
 }));
 $('#voice-session').addEventListener('click', guarded(async () => {
   if (voiceSession && !state.busy) { await refreshSessions(); await loadSession(voiceSession); await openView('chat'); }

@@ -61,6 +61,7 @@ def prepare_settings(directory):
 class LocalService:
     """Reserve a private ephemeral port; never attach to or stop another server."""
     def __init__(self, settings, config_file=None, app_factory=create_app):
+        self.voice_autostart = settings.voice_autostart
         self.app = app_factory(settings)
         self.app.state.presentation = "desktop"
         self.app.state.config_file = str(config_file) if config_file else ""
@@ -97,13 +98,18 @@ class LocalService:
                             from .voice import DesktopVoice
                             # Owned loopback service only; never write its token to disk/logs.
                             bootstrap = client.get(self.url + "/api/bootstrap").json()
-                            self.app.state.voice = DesktopVoice(self.url, bootstrap["token"])
+                            self.app.state.voice = DesktopVoice(self.url, bootstrap["token"], autostart=self.voice_autostart)
                             return self
                     except httpx.HTTPError:
                         pass
                 time.sleep(.02)
         self.stop()
         raise RuntimeError("本地服务未在 10 秒内就绪。")
+
+    def on_window_shown(self):
+        with self.stop_lock:
+            if not self.stopped and self.app.state.voice:
+                self.app.state.voice.app_opened()
 
     def stop(self):
         with self.stop_lock:
@@ -187,6 +193,7 @@ def run_window(settings, config_file, *, webview_module=None, debug=False):
                 service.app.state.install_update = install_update
         # Closing the native window cancels active streams and owned Codex subprocesses.
         window.events.closing += service.stop
+        window.events.shown += service.on_window_shown
         menu = [Menu("夏鱼洛", [
             MenuAction("打开配置目录", lambda: open_directory(Path(config_file).parent)),
             MenuAction("打开日志目录", lambda: open_directory(Path(settings.data_dir))),

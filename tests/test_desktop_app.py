@@ -101,6 +101,23 @@ def test_mobile_mode_uses_configured_loopback_port(tmp_path):
         service.stop()
 
 
+def test_window_shown_dispatches_autostart_but_not_after_shutdown(tmp_path):
+    service = LocalService(Settings(data_dir=str(tmp_path), voice_autostart=False))
+    calls = []
+    try:
+        service.start()
+        assert service.app.state.voice.autostart is False
+        assert not service.app.state.voice.status()['running']
+        service.app.state.voice.app_opened = lambda: calls.append('window-open')
+        service.on_window_shown()
+        assert calls == ['window-open']
+        service.stop()
+        service.on_window_shown()
+        assert calls == ['window-open']
+    finally:
+        service.stop()
+
+
 def test_window_close_cancels_active_codex_task(tmp_path):
     service = LocalService(Settings(data_dir=str(tmp_path / 'memory'), codex_workspace=str(tmp_path)))
     codex = service.app.state.codex
@@ -160,7 +177,7 @@ def test_renderer_failure_does_not_leave_a_service(tmp_path):
     urls = []
     def create(title, url, **options):
         urls.append(url)
-        return SimpleNamespace(events=SimpleNamespace(closing=Event(None, should_lock=True)),
+        return SimpleNamespace(events=SimpleNamespace(closing=Event(None, should_lock=True), shown=Event(None)),
                                destroy=lambda: None, load_url=lambda url: None)
     def fail(**options):
         raise RuntimeError('renderer fixture failed')

@@ -1,4 +1,4 @@
-"""Opt-in offline microphone recognition, independent of the desktop renderer.
+"""Authorized offline microphone recognition, independent of the desktop renderer.
 
 Only post-wake utterances reach the existing chat API. No audio is saved/uploaded.
 Tool/Codex approvals are deliberately not implemented here.
@@ -49,7 +49,7 @@ def model_directory():
 
 
 class DesktopVoice:
-    def __init__(self, url, token, *, platform=None, model=None):
+    def __init__(self, url, token, *, platform=None, model=None, autostart=True):
         self.url, self.token = url, token
         self.platform = platform or sys.platform
         self.model = Path(model) if model else model_directory()
@@ -60,6 +60,8 @@ class DesktopVoice:
         self.connection = None
         self.voice_token = None
         self.microphone = None
+        self.autostart = autostart
+        self.autostart_attempted = False
 
     def available(self):
         if self.platform != "win32":
@@ -74,10 +76,24 @@ class DesktopVoice:
         available, reason = self.available()
         return {"available": available, "reason": reason, "running": bool(self.thread and self.thread.is_alive()),
                 "phase": self.phase, "message": self.message, "session_id": self.session,
-                "wake_word": "夏鱼洛", "follow_up_seconds": 30}
+                "wake_word": "夏鱼洛", "follow_up_seconds": 30,
+                "autostart": self.autostart, "autostart_attempted": self.autostart_attempted}
 
-    def start(self):
+    def app_opened(self):
+        """Called by the native window, never by headless service/UI polling."""
+        if self.platform != "win32":
+            return self.status()
+        try:
+            return self.start(automatic=True)
+        except ValueError as error:
+            self.phase, self.message = "off", "自动语音未开启：" + str(error)
+            return self.status()
+
+    def start(self, *, automatic=False):
         with self.lock:
+            if automatic and (not self.autostart or self.autostart_attempted):
+                return self.status()
+            self.autostart_attempted = True
             if self.thread and self.thread.is_alive():
                 return self.status()
             ready, reason = self.available()
@@ -90,7 +106,9 @@ class DesktopVoice:
         return self.status()
 
     def stop(self):
-        self.stop_event.set()
+        with self.lock:
+            self.autostart_attempted = True  # Stop wins over a delayed/repeated window-shown event.
+            self.stop_event.set()
         if self.microphone:
             try:
                 self.microphone.abort()
@@ -99,7 +117,7 @@ class DesktopVoice:
         connection = self.connection
         if connection:
             connection.close()
-        self.phase, self.message = "off", "语音已停止；没有自动重启或开机监听。"
+        self.phase, self.message = "off", "语音已停止；本次打开不自动重启，重新打开 App 后再尝试待命。"
 
     def _request(self, client, path, body=None):
         response = client.request("GET" if body is None else "POST", self.url + "/api/" + path, json=body)

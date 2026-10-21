@@ -187,7 +187,7 @@ class VoiceService : Service() {
                     "sleep" -> "好的，等你再次呼唤夏鱼洛。"
                     "wake" -> "我在，请说。"
                     else -> {
-                        state("thinking", "已唤醒，正在进行 Codex 只读问答；编程/工具仍需电脑确认。")
+                        state("thinking", "已唤醒，正在进行 Codex 只读问答；编程/工具请用对应入口并遵循电脑设置。")
                         val text = chat!!.ask(prompt); VoiceState.session = chat!!.session; text
                     }
                 }

@@ -20,6 +20,7 @@ class Settings:
     mobile_enabled: bool = False
     chat_provider: str = "auto"
     approval_mode: str = "auto"
+    voice_autostart: bool = True
 
     @classmethod
     def load(cls, env_file=None):
@@ -38,6 +39,7 @@ class Settings:
             mobile_enabled=os.getenv("MOBILE_ENABLED", "false").lower() == "true",
             chat_provider=os.getenv("CHAT_PROVIDER", "auto").strip().lower(),
             approval_mode=os.getenv("APPROVAL_MODE", "auto").strip().lower(),
+            voice_autostart=os.getenv("VOICE_AUTOSTART", "true").strip().lower() == "true",
         )
         url = urlsplit(settings.api_base)
         if url.scheme not in {"http", "https"} or not url.hostname or url.username:

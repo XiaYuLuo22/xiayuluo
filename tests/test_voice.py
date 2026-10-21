@@ -9,6 +9,52 @@ from assistant.voice import DesktopVoice, WakeGate
 from tools.prepare_voice_model import MODEL, unpack
 
 
+def test_window_open_autostarts_once_and_stop_wins(monkeypatch):
+    created = []
+    class Thread:
+        def __init__(self, **options): self.running = False; created.append(self)
+        def start(self): self.running = True
+        def is_alive(self): return self.running
+    monkeypatch.setattr('assistant.voice.Thread', Thread)
+    voice = DesktopVoice('http://127.0.0.1:12345', 'fixture', platform='win32')
+    voice.available = lambda: (True, 'fixture')
+    assert not voice.status()['running']  # Construction/headless readiness never opens a mic.
+    assert voice.app_opened()['running']
+    assert len(created) == 1
+    voice.app_opened()
+    assert len(created) == 1
+    voice.stop(); created[0].running = False
+    assert not voice.app_opened()['running']
+    assert len(created) == 1
+    voice.start()
+    assert len(created) == 2
+    voice.stop()
+
+
+def test_stop_before_window_show_prevents_delayed_autostart(monkeypatch):
+    def unexpected(**options): raise AssertionError('microphone worker must not start')
+    monkeypatch.setattr('assistant.voice.Thread', unexpected)
+    voice = DesktopVoice('http://127.0.0.1:12345', 'fixture', platform='win32')
+    voice.available = lambda: (True, 'fixture')
+    voice.stop()
+    assert not voice.app_opened()['running']
+
+
+def test_autostart_optout_unavailable_and_cloud_do_not_listen(monkeypatch):
+    def unexpected(**options): raise AssertionError('microphone worker must not start')
+    monkeypatch.setattr('assistant.voice.Thread', unexpected)
+    off = DesktopVoice('http://127.0.0.1:12345', 'fixture', platform='win32', autostart=False)
+    off.available = lambda: (True, 'fixture')
+    assert not off.app_opened()['running']
+    missing = DesktopVoice('http://127.0.0.1:12345', 'fixture', platform='win32')
+    missing.available = lambda: (False, 'fixture missing model')
+    assert not missing.app_opened()['running']
+    assert 'fixture missing model' in missing.status()['message']
+    assert missing.autostart_attempted
+    cloud = DesktopVoice('http://127.0.0.1:12345', 'fixture', platform='linux')
+    assert not cloud.app_opened()['running']
+
+
 def test_wake_gate_discards_ambient_and_only_forwards_post_wake_text():
     now = [100.0]
     gate = WakeGate(clock=lambda: now[0])

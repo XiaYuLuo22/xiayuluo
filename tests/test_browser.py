@@ -475,7 +475,10 @@ def test_voice_opt_in_start_stop_controls(page):
     start.click()
     playwright_api.expect(page.locator('#voice-status')).to_contain_text('正在本地监听')
     assert requests == [{'confirm': True}]
-    page.locator('#voice-stop').click()
+    playwright_api.expect(page.locator('#voice-indicator')).to_have_attribute('aria-label', '停止监听：正在本地监听')
+    page.locator('[data-view="chat"]').click()
+    page.locator('#voice-indicator').click()  # Global stop works outside Settings too.
+    page.locator('[data-view="settings"]').click()
     playwright_api.expect(page.locator('#voice-status')).to_contain_text('语音未开启')
 
 

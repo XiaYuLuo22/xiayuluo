@@ -3,6 +3,14 @@ import pytest
 from assistant.config import Settings
 
 
+def test_voice_autostarts_by_default_and_local_optout_is_respected(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv('VOICE_AUTOSTART', raising=False)
+    assert Settings.load().voice_autostart is True
+    monkeypatch.setenv('VOICE_AUTOSTART', 'false')
+    assert Settings.load().voice_autostart is False
+
+
 def test_cloud_binding_is_used_without_exposing_credentials(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv('ASSISTANT_MODEL_KEY', 'cloud-test-only')

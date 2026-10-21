@@ -4,7 +4,8 @@ import { Alert, AppState, FlatList, KeyboardAvoidingView, Modal, Platform, Press
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { UpdateCard } from './src/UpdateCard';
-import { VoiceCard, stopVoice } from './src/VoiceCard';
+import { VoiceCard } from './src/VoiceCard';
+import { useVoice } from './src/voice';
 import { Client, loadConnection, pairDevice, saveConnection, type Action, type Connection,
   type Memory, type Message, type Session, type Workspace } from './src/client';
 
@@ -43,6 +44,7 @@ function Home() {
   // New installs default to the owner's authorized automatic policy. Host-only
   // operations still require an online paired connection and observed workspace.
   const automatic = workspace?.approvals !== 'desktop-only';
+  const voice = useVoice(connection, ready, online);
 
   useEffect(() => {
     let alive = true;
@@ -91,7 +93,7 @@ function Home() {
   async function disconnect() {
     if (busy) return;
     try {
-      await stopVoice();
+      await voice.stop();
       await saveConnection(null); setConnection(null); setOnline(false); setSelected(null);
       setMessages([]); setSessions([]); setMemories([]); setTasks([]); setWorkspace(null); setDraft(''); setMemoryDraft('');
       setNotice('已移除此手机的本地凭据。要彻底撤销访问，请同时在电脑设备页撤销设备。');
@@ -150,6 +152,9 @@ function Home() {
     </View>
     <View style={s.connection}><View style={[s.dot, { backgroundColor: online ? '#408d68' : '#c4a66b' }]} />
       <Text style={s.connectionText}>{connection ? online ? '已连接电脑 · 前台每 5 秒同步' : '电脑未连接 · 不会自动重发' : '本机未配对 · 连接你的电脑继续'}</Text></View>
+    <View style={s.voiceStatus}><Pressable accessibilityLabel="语音监听状态" onPress={() => setTab('devices')} style={s.flex}>
+      <Text numberOfLines={2} style={s.connectionText}>{voice.status.running ? '● 语音服务运行中 · ' : '○ 语音服务未运行 · '}{voice.status.message}</Text>
+    </Pressable>{(voice.status.running || voice.busy) && <Pressable accessibilityLabel="立即停止监听" onPress={() => void voice.stop().catch(error => setNotice(errorText(error)))}><Text style={s.mode}>停止监听</Text></Pressable>}</View>
     {!!notice && <Pressable accessibilityLabel="关闭提示" style={s.notice} onPress={() => setNotice('')}><Text style={s.noticeText}>{notice}　×</Text></Pressable>}
     {tab === 'chat' && <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <FlatList ref={list} data={messages} keyExtractor={item => String(item.id)} contentContainerStyle={s.chatList}
@@ -196,7 +201,7 @@ function Home() {
       <Text style={s.description}>手机、电脑、开发者模式，共用同一份对话与四级记忆。仅与你主动配对的电脑连接。</Text>
       <WorkspaceCard workspace={workspace} online={online} />
       <UpdateCard disabled={busy} automatic={automatic} />
-      <VoiceCard connection={connection} disabled={busy} automatic={automatic} onSession={id => { if (!busy) { setSelected(id); setMessages([]); setTab('chat'); } }} />
+      <VoiceCard voice={voice} disabled={busy} automatic={automatic} onSession={id => { if (!busy) { setSelected(id); setMessages([]); setTab('chat'); } }} />
       {connection ? <View style={s.card}><Text style={s.cardText}>{connection.name}</Text><Text selectable style={s.hint}>{connection.url}</Text>
         <Text style={s.hint}>凭据保存在系统安全存储，不同步模型密钥。解除本机配对不会删除电脑数据。</Text>
         <Button label="解除本机配对" disabled={busy} onPress={() => automatic ? void disconnect() : Alert.alert('解除配对？', '清除此手机凭据。电脑中可另行撤销访问权限。', [{ text: '取消' }, { text: '解除', style: 'destructive', onPress: () => void disconnect() }])} /></View> : <View style={s.card}>
@@ -236,6 +241,7 @@ const s = StyleSheet.create({
   headerIcon: { fontSize: 25, color: '#60856a', padding: 5 }, subtle: { color: '#91a18d', fontSize: 12 },
   connection: { flexDirection: 'row', gap: 7, alignItems: 'center', justifyContent: 'center', paddingBottom: 12 },
   dot: { width: 5, height: 5, borderRadius: 3 }, connectionText: { fontSize: 10, color: '#879680' },
+  voiceStatus: { marginHorizontal: 22, marginBottom: 8, alignItems: 'center', flexDirection: 'row', gap: 8 },
   notice: { backgroundColor: '#f3f5e9', marginHorizontal: 20, padding: 11, borderRadius: 10, marginBottom: 8 }, noticeText: { color: '#738267', fontSize: 12, lineHeight: 20 },
   chatList: { padding: 23, flexGrow: 1 }, welcome: { paddingTop: 28 }, hero: { color: '#48916c', backgroundColor: '#eaf4e9', width: 56, height: 56, textAlign: 'center', lineHeight: 56, borderRadius: 18, fontSize: 37, marginBottom: 24 },
   title: { fontSize: 26, fontWeight: '600', color: '#304c37', marginBottom: 15 }, description: { color: '#7b8b74', fontSize: 13, lineHeight: 24, marginBottom: 25 },
