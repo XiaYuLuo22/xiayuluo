@@ -52,6 +52,20 @@ const json = async (path, options) => (await api(path, options)).json();
 const post = (path, body = {}) => json(path, { method: 'POST', body: JSON.stringify(body) });
 const automaticMode = () => state.status?.automation?.mode === 'auto';
 const approveLocally = (text) => automaticMode() || confirm(text);
+const usingCodex = () => (state.provider === 'auto' ? state.status?.model.provider : state.provider) === 'codex';
+let codexConnecting = false, codexLastAttempt = 0;
+async function connectCodex(refresh = false) {
+  if (!state.token || codexConnecting || state.busy || document.hidden) return;
+  codexConnecting = true; codexLastAttempt = Date.now();
+  $('#connect-codex').disabled = true;
+  $('#codex-connection').textContent = '正在检测官方 Codex CLI 的 ChatGPT 登录…';
+  try {
+    await post(refresh ? '/api/codex/connect?refresh=true' : '/api/codex/connect');
+    await refreshStatus();
+  } catch (error) { $('#codex-connection').textContent = error.message; }
+  finally { codexConnecting = false; $('#connect-codex').disabled = false; }
+}
+$('#connect-codex').addEventListener('click', guarded(() => connectCodex(true)));
 
 let updateBusy = false;
 let voiceSession = null;
@@ -217,13 +231,15 @@ async function refreshStatus() {
   const status = state.status;
   const source = state.provider === 'auto' ? status.model.provider : state.provider;
   const ready = source === 'codex' ? status.model.codex_chat_available : status.model.api_configured;
-  $('#model-status').textContent = ready ? (source === 'codex' ? `Codex · 已找到 CLI，${automaticMode() ? '发送后直接调用' : '发送后确认'}` : `${status.model.api_name} · API 已配置`) : (source === 'codex' ? '请安装并登录官方 Codex CLI' : 'API 待配置');
+  const connection = status.model.codex_connection;
+  $('#codex-connection').textContent = connection.message;
+  $('#model-status').textContent = ready ? (source === 'codex' ? connection.logged_in ? `Codex · ChatGPT 登录已识别，${automaticMode() ? '发送后直接调用' : '发送后确认'}` : `Codex · 已找到 CLI，${connection.phase === 'attention' ? '登录需处理' : '正在检测登录'}` : `${status.model.api_name} · API 已配置`) : (source === 'codex' ? '请安装并登录官方 Codex CLI' : 'API 待配置');
   $('#approval-mode').value = status.automation.mode;
   $('#automation-status').textContent = status.automation.warning || (automaticMode() ? '已授权默认同意：发送后直接执行，不逐次弹窗；切换设置不会重放旧请求。' : '当前逐次确认：工具请求等待你在电脑批准。');
   $('#execution-badge').textContent = automaticMode() ? '默认同意 · 自动执行' : '执行前需确认';
   $('#view-desktop .mini-tag').textContent = automaticMode() ? 'AUTO EXECUTION' : 'APPROVAL REQUIRED';
   $('#task-policy').textContent = automaticMode() ? '自动模式：新指令直接执行，结果在原会话显示。旧待确认请求不会自动重放，可在此单独处理或取消。' : '手机和当前电脑的请求在这里等待确认，2 分钟过期，不自动执行。';
-  $('#model-dot').classList.toggle('off', !ready);
+  $('#model-dot').classList.toggle('off', !ready || (source === 'codex' && !connection.logged_in));
   $('#connection-hint').hidden = ready;
   $('#desktop-notice').textContent = status.desktop.available ? '本机桌面驱动可用。截图有效期为 2 分钟；点击确认前会校验目标区域。请勿在运行点击时移动窗口。' : status.desktop.reason;
   $('#desktop-notice').classList.toggle('ready', status.desktop.available);
@@ -550,6 +566,7 @@ async function syncViews() {
   state.syncing = true;
   const observedSession = state.session;
   try {
+    if (usingCodex() && Date.now() - codexLastAttempt > 30000) void connectCodex();
     const sessions = await refreshSessions();
     if (state.session === observedSession && state.session && !sessions.some(item => item.id === state.session)) { state.session = null; resetChat(); }
     if (!$('#view-chat').hidden && state.session) {
@@ -609,6 +626,7 @@ $('#chat-provider').addEventListener('change', guarded(async event => {
   state.provider = event.target.value;
   try { localStorage.setItem('xiayuluo.chat-provider', state.provider); } catch { /* Window preference only. */ }
   await refreshStatus();
+  if (usingCodex()) void connectCodex();
 }));
 $('#session-search').addEventListener('input', renderSessions);
 
@@ -661,4 +679,5 @@ guarded(async () => {
   void refreshVoice();
   setInterval(() => void refreshVoice(), 3000);
   await refreshStatus(); const sessions = await refreshSessions(); if (sessions.length) await loadSession(sessions[0].id);
+  if (usingCodex()) void connectCodex();
 })();

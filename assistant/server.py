@@ -168,6 +168,7 @@ def create_app(settings=None, *, memory=None, transport=None):
                           "endpoint": public_endpoint if provider == "api" else "本机官方 CLI",
                           "provider": provider, "preference": settings.chat_provider,
                           "api_configured": bool(settings.api_key), "api_name": settings.model, "codex_chat_available": dialogue_ready,
+                          "codex_connection": dialogue.connection_status(),
                           "reason": dialogue_reason if provider == "codex" else "配置存在不等于连接已通过。",
                           "confirmation_required": provider == "codex" and not automation.automatic},
                 "desktop": {"available": desktop.available()[0], "reason": desktop.available()[1], "scope": "主屏幕"},
@@ -245,6 +246,15 @@ def create_app(settings=None, *, memory=None, transport=None):
     @app.get("/api/workspace", dependencies=auth)
     async def get_workspace():
         return codex.workspace_status()
+
+    @app.post("/api/codex/connect", dependencies=auth)
+    async def connect_codex(refresh: bool = False):
+        if app.state.updating:
+            raise HTTPException(409, "更新期间暂停登录检测。")
+        try:
+            return await dialogue.check_login(cached=not refresh)
+        except ValueError:
+            return dialogue.connection_status()
 
     @app.get("/api/automation", dependencies=auth)
     async def get_automation():

@@ -119,7 +119,8 @@
       </section>
 
       <section id="view-settings" class="view content-view" hidden>
-        <div class="settings-card"><h2>执行方式</h2><label for="approval-mode">应用内确认</label> <select id="approval-mode"><option value="auto">默认同意 · 自动执行已配置工具</option><option value="manual">逐次确认</option></select><p id="automation-status" role="status"></p><p>自动模式会直接发送聊天上下文、执行指定项目的 Codex 任务、有效截图点击及用户要求的记忆保存。可能修改文件或发生不可撤回的点击。此授权仅针对本机已配置权限，不关闭沙箱或设备校验；操作仍可停止，已发生的变更不会撤回。麦克风默认关闭，点击开启后才监听。系统授权、账号登录和安装器提示仍由系统控制。</p></div>
+        <div class="settings-card"><h2>Codex 自动接入</h2><p id="codex-connection" role="status">启动后自动检测官方 CLI 的 ChatGPT 登录…</p><button id="connect-codex" class="secondary-button">重新检测 Codex</button><p>ChatGPT / Codex 桌面窗口是否打开不作为连接依据。首次需安装官方 Codex CLI 并通过 codex login 选择 ChatGPT 登录；以后复用其官方登录，无需每次配置。检测不发送聊天、不消耗模型 API、不读取 Cookie 或复制令牌。登录已识别不等于服务网络及额度已验证，实际回复时仍重新校验。保留你显式选择的 API 来源，不会偷偷切换或失败回退付费 API。</p></div>
+        <div class="settings-card"><h2>执行方式</h2><label for="approval-mode">应用内确认</label> <select id="approval-mode"><option value="auto">默认同意 · 自动执行已配置工具</option><option value="manual">逐次确认</option></select><p id="automation-status" role="status"></p><p>自动模式会直接发送聊天上下文、执行指定项目的 Codex 任务、有效截图点击及用户要求的记忆保存。可能修改文件或发生不可撤回的点击。此授权仅针对本机已配置权限，不关闭沙箱或设备校验；操作仍可停止，已发生的变更不会撤回。麦克风按已授权的原生启动设置尝试开启，仍需系统权限，可随时停止。系统授权、账号登录和安装器提示仍由系统控制。</p></div>
         <div class="page-heading"><div><div class="eyebrow">SETTINGS</div><h1>你的助手，你的设置</h1><p>查看连接状态，管理隐私，按需开启开发者模式。</p></div><button id="refresh-status" class="secondary-button">刷新状态</button></div>
         <div class="settings-card preference-card"><div><h2>开发者模式</h2><p>显示运行指标、事件日志、工具参数和检查面板。默认关闭。</p></div><label class="switch"><input id="developer-mode" type="checkbox" role="switch" aria-label="开发者模式"><span aria-hidden="true"></span></label></div>
         <div id="settings-status" class="settings-status"></div>

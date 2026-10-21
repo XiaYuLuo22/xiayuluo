@@ -309,6 +309,39 @@ class CodexChat(Codex):
     description = "按本机执行策略，将近期会话和相关记忆发送给官方 Codex CLI；只读问答，不使用模型 API 密钥。"
     arguments = CodexChatArguments
 
+    def __init__(self, settings):
+        super().__init__(settings)
+        self.login_lock = asyncio.Lock()
+        self.login_checked = None
+        self.login_state = {"phase": "unchecked", "logged_in": False, "checked_at": None,
+                            "scope": "cli-login-only", "message": "启动后自动检测官方 Codex CLI 登录；不读取桌面 App 登录数据。"}
+
+    def connection_status(self):
+        return dict(self.login_state)
+
+    async def check_login(self, *, cached=False):
+        """Safe, non-billable CLI diagnostic; never returns the command's raw output."""
+        async with self.login_lock:
+            ttl = 30 if self.login_state["logged_in"] else 2
+            if cached and self.login_checked is not None and time.monotonic() - self.login_checked < ttl:
+                return self.connection_status()
+            self.login_state.update(phase="checking", logged_in=False, message="正在检测官方 Codex CLI 的 ChatGPT 登录…")
+            try:
+                await self._check_login()
+            except (ValueError, OSError) as error:
+                message = str(error) if isinstance(error, ValueError) else "无法运行官方 Codex CLI，请在电脑检查安装并执行 codex login。"
+                self.login_state.update(phase="attention", logged_in=False, message=message)
+                raise ValueError(message) from error
+            else:
+                self.login_state.update(phase="ready", logged_in=True,
+                    message="已识别官方 Codex CLI 的 ChatGPT 登录；后续问答使用该登录，网络、权限和会员额度以实际回复为准。")
+            finally:
+                if self.login_state["phase"] == "checking":
+                    self.login_state.update(phase="unchecked", message="检测已中断，下次启动或刷新时再检测。")
+                self.login_checked = time.monotonic()
+                self.login_state["checked_at"] = datetime.now(timezone.utc).isoformat()
+            return self.connection_status()
+
     def available(self):
         try:
             self.command_prefix()
@@ -343,7 +376,7 @@ class CodexChat(Codex):
             environment.pop(key, None)
         return environment
 
-    async def _events(self, prompt, workspace):
+    async def _check_login(self):
         # Inspect only official CLI login status, never open/copy credential files.
         process = await asyncio.create_subprocess_exec(*self.command_prefix(), "login", "status",
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -361,6 +394,10 @@ class CodexChat(Codex):
             raise ValueError("Codex 登录状态检查超时，请在电脑终端检查官方 CLI。") from error
         finally:
             await stop_owned_process(process)
+
+    async def _events(self, prompt, workspace):
+        # Never use a cached diagnostic as authorization for an actual question.
+        await self.check_login()
         async with aclosing(super()._events(prompt, workspace)) as stream:
             async for event in stream:
                 yield event

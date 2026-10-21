@@ -192,3 +192,88 @@ def test_phone_can_propose_dialogue_but_only_computer_can_approve(client_factory
     assert events(client.post(f"/api/actions/{action['id']}/approve"))[-1]['type'] == 'done'
     assert 'chat fixture: 手机日常问题' in client.get(base + f'/sessions/{session}', headers=headers).json()['messages'][-1]['content']
     assert not records
+
+
+def test_startup_connect_only_checks_login_and_never_sends_a_question(client_factory, tmp_path):
+    client, _, _, records = setup_chat(client_factory, tmp_path)
+    before = client.get('/api/sessions').json()
+    response = client.post('/api/codex/connect')
+    assert response.status_code == 200
+    assert response.json()['phase'] == 'ready' and response.json()['logged_in']
+    assert response.json()['scope'] == 'cli-login-only'
+    assert response.json()['checked_at']
+    assert client.get('/api/status').json()['model']['codex_connection'] == response.json()
+    assert client.get('/api/sessions').json() == before
+    assert not client.get('/api/actions').json() and not records
+
+
+def test_cached_connect_does_not_authorize_chat_after_login_changes(client_factory, tmp_path):
+    client, engine, session, records = setup_chat(client_factory, tmp_path)
+    checks = []
+    original = engine._check_login
+    async def check():
+        checks.append(True)
+        return await original()
+    engine._check_login = check
+    assert client.post('/api/codex/connect').json()['logged_in']
+    assert client.post('/api/codex/connect').json()['logged_in']
+    assert len(checks) == 1
+    engine.command_prefix = lambda: [sys.executable, str(Path(__file__).parent / 'fake_codex.py'), '--fixture-api-login']
+    action = proposal(client, session)
+    result = client.post(f"/api/actions/{action['id']}/approve")
+    assert events(result)[-1]['type'] == 'error' and len(checks) == 2
+    state = client.get('/api/status').json()['model']['codex_connection']
+    assert state['phase'] == 'attention' and not state['logged_in']
+    assert 'REDACTED_TEST_KEY' not in result.text + json.dumps(state)
+    assert not records
+
+
+def test_manual_connect_recheck_bypasses_diagnostic_cache(client_factory, tmp_path):
+    client, engine, _, records = setup_chat(client_factory, tmp_path)
+    assert client.post('/api/codex/connect').json()['logged_in']
+    engine.command_prefix = lambda: [sys.executable, str(Path(__file__).parent / 'fake_codex.py'), '--fixture-api-login']
+    assert client.post('/api/codex/connect').json()['logged_in']
+    state = client.post('/api/codex/connect?refresh=true').json()
+    assert not state['logged_in'] and state['phase'] == 'attention'
+    assert 'REDACTED_TEST_KEY' not in json.dumps(state)
+    assert not records
+
+
+@pytest.mark.parametrize('problem', ['missing', 'api-login'])
+def test_connect_failures_are_sanitized_and_do_not_change_provider(client_factory, tmp_path, problem):
+    client, records = client_factory(settings=Settings(api_key='never-print-api-key', chat_provider='api', data_dir=str(tmp_path)))
+    engine = client.app.state.codex_chat
+    if problem == 'missing':
+        def missing(): raise ValueError('未找到官方 Codex CLI。')
+        engine.command_prefix = missing
+    else:
+        engine.command_prefix = lambda: [sys.executable, str(Path(__file__).parent / 'fake_codex.py'), '--fixture-api-login']
+    response = client.post('/api/codex/connect')
+    assert response.json()['phase'] == 'attention' and not response.json()['logged_in']
+    assert 'REDACTED_TEST_KEY' not in response.text and 'never-print-api-key' not in response.text
+    assert client.get('/api/status').json()['model']['provider'] == 'api'
+    assert not records and not client.get('/api/actions').json()
+
+
+def test_connect_requires_local_authorization_and_is_not_a_mobile_control(client_factory, tmp_path):
+    client, _, _, _ = setup_chat(client_factory, tmp_path, mobile_enabled=True)
+    assert client.post('/api/codex/connect', headers={'X-Assistant-Token': ''}).status_code == 403
+    from test_mobile import pair, phone
+    headers = phone(client, pair(client)['token'])
+    assert client.post('https://phone.example/mobile/v1/codex/connect', headers=headers).status_code == 403
+
+
+async def test_cancelled_login_probe_releases_lock_and_does_not_report_ready():
+    engine = CodexChat(Settings())
+    entered = asyncio.Event()
+    async def pending():
+        entered.set()
+        await asyncio.Event().wait()
+    engine._check_login = pending
+    task = asyncio.create_task(engine.check_login(cached=True))
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError): await task
+    assert not engine.login_lock.locked()
+    assert engine.connection_status()['phase'] == 'unchecked'
+    assert not engine.connection_status()['logged_in']

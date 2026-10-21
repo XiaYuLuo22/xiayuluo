@@ -177,6 +177,27 @@ def test_browser_auto_mode_direct_chat_and_click_without_dialog(page, browser_ap
     playwright_api.expect(page.locator('#automation-status')).to_contain_text('当前逐次确认')
 
 
+def test_browser_automatically_identifies_codex_login_on_open_without_model_request(page, browser_app):
+    _, app = browser_app
+    requests = []
+    page.on('request', lambda request: requests.append(request.url))
+    page.evaluate("localStorage.setItem('xiayuluo.chat-provider', 'codex')")
+    page.reload()
+    playwright_api.expect(page.locator('#model-status')).to_contain_text('ChatGPT 登录已识别')
+    assert any(url.endswith('/api/codex/connect') for url in requests)
+    assert not app.state.model_requests
+    assert not app.state.memory.sessions()
+    page.locator('[data-view="settings"]').click()
+    playwright_api.expect(page.locator('#codex-connection')).to_contain_text('实际回复为准')
+    # Recheck uses a fresh CLI probe, not the successful startup cache.
+    app.state.codex_chat.command_prefix = lambda: [sys.executable, str(Path(__file__).parent / 'fake_codex.py'), '--fixture-api-login']
+    with page.expect_response('**/api/codex/connect?refresh=true'):
+        page.locator('#connect-codex').click()
+    playwright_api.expect(page.locator('#codex-connection')).to_contain_text('只接受 ChatGPT 登录')
+    playwright_api.expect(page.locator('#model-status')).to_contain_text('登录需处理')
+    assert not app.state.model_requests and not app.state.memory.sessions()
+
+
 def test_browser_desktop_requires_confirmation(page, browser_app):
     _, app = browser_app
     page.locator('[data-view="desktop"]').click()

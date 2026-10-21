@@ -8,7 +8,9 @@
 
 0.1.4 语音测试功能需要另外安装 `.[app,desktop,voice]`、准备官方中文离线模型并具备系统中文 SAPI 声音；普通 `start.cmd` 的文字聊天不强制下载模型。模型已在云端获取并校验，未完成 Windows 麦克风验收；Windows 安装包仍须在 Windows 构建，不能把源码通过当成 EXE 已验收。设置页会明确显示不可用原因，见 [VOICE.md](VOICE.md)。
 
-日常问答可以使用官方 Codex CLI 的 ChatGPT 登录，不需要模型 API 密钥或项目目录；需要支持安全开关的新版 CLI，发送前逐次确认。仅装 Codex 桌面 App 不代表 CLI 已可用，完整步骤见 [CODEX_CHAT.md](CODEX_CHAT.md)。编程模式仍需项目目录。
+日常问答可以使用官方 Codex CLI 的 ChatGPT 登录，不需要模型 API 密钥或项目目录；需要支持安全开关的新版 CLI，默认发送即调用，执行方式可在设置修改。0.1.8 在界面启动/选择 Codex 时自动识别现有 CLI 登录，设置可重新检测；无需先打开 ChatGPT/Codex 窗口，仅装桌面 App 不代表 CLI 已安装或登录。检测只验证本地登录方式，网络/权限/额度以实际回复为准，完整步骤见 [CODEX_CHAT.md](CODEX_CHAT.md)。编程模式仍需项目目录。
+
+0.1.8 本次提供电脑源码 ZIP，不是 EXE。更新前关闭夏鱼洛并备份原目录；只更新源码，保留自己的 `.env`、`.assistant`、语音模型与虚拟环境，再运行 `start.cmd`。已配对的安卓 0.1.7 协议兼容，无需重装。
 
 需要 Windows 10/11、Python 3.11+ 和 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。许多 Windows 电脑已有此运行库。需要 Codex 时另外安装 Node.js 22+ 和 Codex CLI。
 
