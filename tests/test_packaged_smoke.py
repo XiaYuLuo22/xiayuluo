@@ -60,6 +60,23 @@ def test_windowed_frozen_serve_does_not_configure_missing_console_streams(monkey
     assert seen == [("controlled-app", {"host": "127.0.0.1", "port": 8765, "log_config": None})]
 
 
+def test_frozen_serve_does_not_write_chinese_to_legacy_redirected_stdout(monkeypatch):
+    import io
+    import assistant.__main__ as entry
+    monkeypatch.setattr(entry.Settings, "load", lambda: Settings())
+    monkeypatch.setattr(entry, "create_app", lambda settings: "controlled-app")
+    monkeypatch.setattr(entry.uvicorn, "run", lambda *args, **kwargs: None)
+    raw = io.BytesIO()
+    legacy = io.TextIOWrapper(raw, encoding='cp1252')
+    with monkeypatch.context() as frozen:
+        frozen.setattr(entry.sys, "frozen", True, raising=False)
+        frozen.setattr(entry.sys, "stdout", legacy)
+        frozen.setattr(entry.sys, "stderr", None)
+        assert entry.main(["--serve"]) == 0
+        legacy.flush()
+    assert raw.getvalue() == b''
+
+
 @pytest.mark.parametrize('preexisting', [False, True])
 def test_smoke_entry_import_error_reports_without_replacing_existing_files(tmp_path, monkeypatch, preexisting):
     entry = Path(__file__).parents[1] / 'tools/desktop_entry.py'

@@ -15,7 +15,9 @@ def main(argv=None):
         from .desktop_app import main as desktop_main
         return desktop_main(debug=args.debug)
     settings = Settings.load()
-    if sys.stdout is not None:
+    # Frozen/windowed executables may expose a legacy cp1252 stream even when
+    # stdout is redirected. This developer-only banner is not an App UI.
+    if not getattr(sys, "frozen", False) and sys.stdout is not None:
         print(f"夏鱼洛开发服务已启动，回环地址 http://127.0.0.1:{settings.port}", flush=True)
     options = {"host": "127.0.0.1", "port": settings.port}
     if getattr(sys, "frozen", False) and sys.stderr is None:
