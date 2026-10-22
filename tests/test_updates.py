@@ -100,7 +100,9 @@ def bundle(path, extra=None):
         archive.writestr('Xiayuluo/XiayuluoUpdater.exe', b'MZhelper')
         archive.writestr('Xiayuluo/_internal/runtime', b'dependency')
         if extra:
-            archive.writestr(extra, b'bad')
+            entry = zipfile.ZipInfo()
+            entry.filename = extra  # Keep malformed raw names on Windows too.
+            archive.writestr(entry, b'bad')
 
 
 @pytest.mark.parametrize('name', ['Xiayuluo/../../escape', '/absolute', 'Xiayuluo/.env', 'Xiayuluo/.assistant/memory.sqlite3', 'Xiayuluo/release-private.pem',

@@ -158,7 +158,9 @@ def test_model_archive_rejects_unsafe_paths(tmp_path, entry):
     archive = tmp_path / 'bad.zip'
     with zipfile.ZipFile(archive, 'w') as bundle:
         bundle.writestr(MODEL + '/am/final.mdl', 'fixture')
-        bundle.writestr(entry, 'bad')
+        info = zipfile.ZipInfo()
+        info.filename = entry  # ZipInfo(name) would normalize backslashes on Windows.
+        bundle.writestr(info, 'bad')
     with pytest.raises(ValueError, match='Unsafe'):
         unpack(archive, tmp_path / 'out')
     assert not (tmp_path / 'out').exists()

@@ -39,9 +39,9 @@ def unpack(archive, destination, expected=None):
         names = set()
         targets = set()
         for item in entries:
-            path = PurePosixPath(item.filename)
+            path = PurePosixPath(item.orig_filename)
             normalized = str(path).casefold()
-            if (path.is_absolute() or not path.parts or path.parts[0] != MODEL
+            if (path.is_absolute() or not path.parts or path.parts[0] != MODEL or "\0" in item.orig_filename
                     or any(part in {".", ".."} or ":" in part or "\\" in part for part in path.parts)
                     or any(part.rstrip(". ") != part or re.fullmatch(r"(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?", part) for part in path.parts)
                     or stat.S_ISLNK(item.external_attr >> 16) or item.filename in names or normalized in targets):

@@ -146,11 +146,14 @@ def extract_windows(archive, stage):
                 raise ValueError("更新包解压大小超限。")
             seen = set()
             for item in entries:
-                path = PurePosixPath(item.filename)
+                # ZipInfo.filename normalizes backslashes on Windows; validate the
+                # unmodified archive name so platform aliases cannot evade policy.
+                original = item.orig_filename
+                path = PurePosixPath(original)
                 parts = path.parts
                 lower = [part.lower() for part in parts]
                 if (not parts or parts[0] != "Xiayuluo" or path.is_absolute() or ".." in parts
-                        or "\\" in item.filename or any(":" in part or part.endswith((".", " ")) for part in parts)
+                        or "\\" in original or "\0" in original or any(":" in part or part.endswith((".", " ")) for part in parts)
                         or stat.S_ISLNK(item.external_attr >> 16)
                         or any(part in {".env", ".assistant", ".venv", ".git", ".release-signing", ".android-signing", "release-private.pem"} for part in lower)
                         or any(re.fullmatch(r"(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?", part) for part in lower)):
