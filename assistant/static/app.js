@@ -3,7 +3,8 @@
 const $ = (selector) => document.querySelector(selector);
 const debug = window.DebugConsole;
 const state = { token: '', status: null, session: null, mode: 'chat', busy: false, controller: null,
-  screenshot: null, attachment: null, position: null, tier: 'first', action: null, plugin: null,
+  tier: 'first', action: null, plugin: null, mouseControl: { enabled: false, available: false },
+  mouseKnown: false, mouseChanging: false, mouseVersion: 0,
   sessions: [], developer: false, historyStamp: '', syncing: false, syncFailed: false, provider: 'auto' };
 const levels = [
   { id: 'temporary', title: '临时性记忆', label: 'TEMPORARY', detail: '当前对话 · 闲置 2 小时', note: '重启后清空' },
@@ -162,14 +163,15 @@ function setMode(mode) {
   state.mode = mode;
   $('#mode-toggle').replaceChildren(document.createTextNode(mode === 'codex' ? '⌘ Codex 编程 ' : '◌ 日常对话 '), el('span', '', '⌄'));
   $('#prompt').placeholder = mode === 'codex' ? (automaticMode() ? '描述编程任务，发送后交给本机 Codex…' : '描述编程任务，确认后交给本机 Codex…') : '和夏鱼洛聊聊，或交给我一件事…';
+  renderMouseControl();
   if (state.status) debug.runtime(state.status, state.session, mode);
 }
 async function openView(view) {
-  if (!['chat', 'memory', 'desktop', 'plugins', 'settings', 'debug', 'tasks', 'devices'].includes(view)) return;
+  if (!['chat', 'memory', 'plugins', 'settings', 'debug', 'tasks', 'devices'].includes(view)) return;
   if (view === 'debug' && !state.developer) return;
   document.querySelectorAll('.view').forEach((node) => { node.hidden = node.id !== `view-${view}`; });
   document.querySelectorAll('.nav-item').forEach((node) => node.classList.toggle('active', node.dataset.view === view));
-  $('#view-title').textContent = { chat: '聊天', memory: '记忆', desktop: '屏幕助手', plugins: '工具箱', settings: '设置', debug: '事件日志', tasks: '待确认任务', devices: '设备与同步' }[view];
+  $('#view-title').textContent = { chat: '聊天', memory: '记忆', plugins: '工具箱', settings: '设置', debug: '事件日志', tasks: '待确认任务', devices: '设备与同步' }[view];
   if (view === 'memory') await renderMemories();
   if (view === 'debug') debug.refresh();
   if (view === 'tasks') await renderTasks();
@@ -182,6 +184,7 @@ function setBusy(busy) {
   $('#prompt').disabled = busy;
   $('#new-chat').disabled = busy;
   $('#mode-toggle').disabled = busy;
+  renderMouseControl();
   document.querySelectorAll('.copy-message').forEach((node) => { node.disabled = busy; });
 }
 function scrollChat() { const box = $('#chat-scroll'); box.scrollTop = box.scrollHeight; }
@@ -251,9 +254,54 @@ function message(role, content = '') {
   row.append(avatar, holder); $('#messages').append(row); scrollChat();
   return { row, body, holder, label };
 }
+function renderMouseControl() {
+  const control = state.mouseControl;
+  const button = $('#mouse-control');
+  button.textContent = `鼠标控制：${control.enabled ? '开' : '关'}`;
+  button.setAttribute('aria-pressed', String(control.enabled));
+  button.setAttribute('aria-busy', String(state.mouseChanging));
+  // Closing remains available while a reply is streaming or in programming mode.
+  button.disabled = state.mouseChanging || (state.mouseKnown && !control.enabled && (!control.available || state.busy || state.mode !== 'chat'));
+  const note = !state.mouseKnown ? '鼠标控制状态未核实；不会为新消息授权操作。点击开关可请求关闭，或在设置中刷新状态。'
+    : control.enabled ? '仅明确的鼠标指令才会截图并发送给所选引擎，不是持续录屏。关闭开关会撤销授权并停止本窗口当前请求。'
+    : !control.available ? `鼠标控制不可用：${control.reason || '本机桌面尚未就绪。'}`
+    : state.mode !== 'chat' ? '鼠标控制请在日常对话中开启；编程消息不会携带鼠标授权。'
+    : '鼠标控制已关闭。开启后，仅明确的鼠标指令才会截图并发送给所选引擎，不是持续录屏。';
+  $('#mouse-control-note').textContent = state.mouseChanging ? '正在向本机服务更新鼠标控制状态…' : note;
+  button.title = note;
+}
+function acceptMouseControl(control) {
+  state.mouseKnown = !!control && typeof control.enabled === 'boolean';
+  state.mouseControl = state.mouseKnown ? { ...control, enabled: control.enabled === true, available: control.available === true }
+    : { enabled: false, available: false, reason: '当前服务未提供鼠标控制，请更新并重启。' };
+  if (state.status) state.status.mouse_control = state.mouseControl;
+  renderMouseControl();
+}
+async function toggleMouseControl() {
+  if (state.mouseChanging) return;
+  const enabled = state.mouseKnown && !state.mouseControl.enabled;
+  if (enabled && (state.busy || state.mode !== 'chat' || !state.mouseControl.available)) return;
+  state.mouseChanging = true; state.mouseVersion += 1; renderMouseControl();
+  let failure;
+  try {
+    const control = await post('/api/mouse-control', { enabled });
+    acceptMouseControl(control);
+    if (control.enabled !== enabled) failure = new Error(control.reason || '服务未接受鼠标控制设置。');
+  } catch (error) { failure = error; state.mouseKnown = false; }
+  finally { state.mouseChanging = false; state.mouseVersion += 1; renderMouseControl(); }
+  if (failure) {
+    // A failed request is never treated as local consent or a successful revocation.
+    await refreshStatus().catch(() => { state.mouseKnown = false; renderMouseControl(); });
+    toast(`鼠标控制设置失败：${failure.message}`);
+  }
+  if (!enabled && state.mouseKnown && !state.mouseControl.enabled) state.controller?.abort();
+}
 async function refreshStatus() {
+  const mouseVersion = state.mouseVersion;
   state.status = await json(`/api/status${state.session ? `?session_id=${encodeURIComponent(state.session)}` : ''}`);
   const status = state.status;
+  if (mouseVersion === state.mouseVersion && !state.mouseChanging) acceptMouseControl(status.mouse_control);
+  else status.mouse_control = state.mouseControl;
   $('#import-update').disabled = !status.runtime.update_supported || updateBusy || state.busy;
   const source = state.provider === 'auto' ? status.model.provider : state.provider;
   const ready = source === 'codex' ? status.model.codex_chat_available : status.model.api_configured;
@@ -263,13 +311,9 @@ async function refreshStatus() {
   $('#approval-mode').value = status.automation.mode;
   $('#automation-status').textContent = status.automation.warning || (automaticMode() ? '已授权默认同意：发送后直接执行，不逐次弹窗；切换设置不会重放旧请求。' : '当前逐次确认：工具请求等待你在电脑批准。');
   $('#execution-badge').textContent = automaticMode() ? '默认同意 · 自动执行' : '执行前需确认';
-  $('#view-desktop .mini-tag').textContent = automaticMode() ? 'AUTO EXECUTION' : 'APPROVAL REQUIRED';
   $('#task-policy').textContent = automaticMode() ? '自动模式：新指令直接执行，结果在原会话显示。旧待确认请求不会自动重放，可在此单独处理或取消。' : '手机和当前电脑的请求在这里等待确认，2 分钟过期，不自动执行。';
   $('#model-dot').classList.toggle('off', !ready || (source === 'codex' && !connection.logged_in));
   $('#connection-hint').hidden = ready;
-  $('#desktop-notice').textContent = status.desktop.available ? '本机桌面驱动可用。截图有效期为 2 分钟；点击确认前会校验目标区域。请勿在运行点击时移动窗口。' : status.desktop.reason;
-  $('#desktop-notice').classList.toggle('ready', status.desktop.available);
-  $('#capture-screen').disabled = !status.desktop.available;
   $('#memory-summary').replaceChildren();
   levels.forEach((level, index) => {
     const row = el('div', 'memory-stat');
@@ -279,7 +323,7 @@ async function refreshStatus() {
   });
   $('#capabilities').replaceChildren();
   const capabilities = [{ title: '流式对话', available: status.model.configured },
-    { title: 'Codex', available: status.codex.available }, { title: '屏幕点击', available: status.desktop.available }];
+    { title: 'Codex', available: status.codex.available }, { title: '聊天鼠标控制', available: status.mouse_control?.available === true }];
   capabilities.forEach((item) => {
     const node = el('div', 'capability'); node.append(el('span', `status-dot${item.available ? '' : ' off'}`),
       el('span', '', item.title), el('span', `capability-status${item.available ? '' : ' off'}`, item.available ? '已配置' : '待连接'));
@@ -317,7 +361,7 @@ function renderSessions() {
 function resetChat() {
   state.historyStamp = '';
   $('#messages').replaceChildren(); $('#welcome').hidden = false;
-  $('#retrieval-note').hidden = true; state.attachment = null; $('#screen-attachment').hidden = true;
+  $('#retrieval-note').hidden = true;
 }
 async function loadSession(id) {
   if (state.busy) return toast('请先等待任务完成或停止。');
@@ -388,19 +432,23 @@ async function consumeStream(path, body, target) {
   }
 }
 async function sendMessage(event) {
-  event.preventDefault(); if (state.busy) return;
+  event.preventDefault(); if (state.busy || state.mouseChanging) return;
   const prompt = $('#prompt').value.trim(); if (!prompt) return;
   const session = await ensureSession();
-  const attachment = state.attachment;
-  $('#prompt').value = ''; state.attachment = null; $('#screen-attachment').hidden = true;
-  message('user', prompt + (attachment ? '\n[本轮附上主屏幕截图]' : ''));
+  $('#prompt').value = '';
+  message('user', prompt);
   const target = message('assistant');
-  await consumeStream('/api/chat', { session_id: session, message: prompt, mode: state.mode, provider: state.provider === 'auto' ? undefined : state.provider, screenshot_id: attachment }, target);
+  await consumeStream('/api/chat', { session_id: session, message: prompt, mode: state.mode, provider: state.provider === 'auto' ? undefined : state.provider,
+    mouse_control: state.mode === 'chat' && state.mouseKnown && state.mouseControl.enabled }, target);
 }
 
 function actionSummary(action) {
   if (action.tool === 'codex_task') return `项目目录（当前配置）：${state.status.codex.workspace}\n提交工作区：${action.workspace?.name || '未设置'}\n工作区编号：${action.workspace?.id || '未设置'}\n提交沙箱：${action.workspace?.sandbox || state.status.codex.sandbox}\n目录或权限改变后必须重新提交。\n\n任务：${action.arguments.prompt}`;
   if (action.tool === 'desktop_click') return `主屏幕坐标：(${action.arguments.x}, ${action.arguments.y})\n按键：${action.arguments.button === 'right' ? '右键' : '左键'}\n截图 ID：${action.arguments.screenshot_id}`;
+  if (action.tool === 'desktop_mouse') {
+    const names = { click: '左键单击', double_click: '左键双击', right_click: '右键单击', move: '移动鼠标', scroll: '滚动' };
+    return `单次鼠标操作：${names[action.arguments.action] || action.arguments.action}\n主屏幕坐标：(${action.arguments.x}, ${action.arguments.y})${action.arguments.action === 'scroll' ? `\n滚动量：${action.arguments.scroll}` : ''}\n截图 ID：${action.arguments.screenshot_id}`;
+  }
   if (action.tool === 'remember') return `层级：${tierName(action.arguments.tier)}\n类型：${kindName(action.arguments.kind)}\n\n${action.arguments.content}`;
   return JSON.stringify(action.arguments, null, 2);
 }
@@ -423,7 +471,7 @@ async function showAction(action, button = null) {
   $('#action-description').textContent = action.tool === 'codex_task'
     ? '确认后将调用本机 Codex。workspace-write 模式可能修改指定项目；CLI 登录与权限需在本机配置。'
     : action.tool === 'codex_chat' ? '确认后发送以下近期会话及参考记忆给官方 Codex CLI。使用 ChatGPT 登录而非 API 密钥；独立临时目录、只读沙箱，禁用命令、插件及浏览器等入口。仍受会员额度限制，不保证逐字输出。'
-    : action.tool === 'desktop_click' ? '确认后将在实际桌面执行一次点击。请先核实目标位置和当前屏幕。' : '确认后才会执行插件操作。';
+    : ['desktop_click', 'desktop_mouse'].includes(action.tool) ? '确认后将在实际桌面执行一次鼠标操作；聊天鼠标开关仍须开启。请先核实目标位置和当前屏幕。' : '确认后才会执行插件操作。';
   $('#action-details').textContent = actionSummary(action); $('#action-dialog').showModal();
 }
 async function declineAction() {
@@ -484,41 +532,9 @@ async function renderMemories() {
     card.append(top, el('p', '', item.content), footer); $('#memory-list').append(card);
   });
 }
-async function captureScreen() {
-  if (state.busy) return toast('请先结束当前任务。');
-  $('#capture-screen').disabled = true;
-  try {
-    const screenshot = await post('/api/desktop/screenshot'); state.screenshot = screenshot; state.position = null;
-    $('#screen-image').src = screenshot.image; $('#screen-container').hidden = false; $('#screen-empty').hidden = true;
-    $('#screen-dimensions').textContent = `主屏幕 · ${screenshot.width} × ${screenshot.height}`;
-    $('#share-screen').disabled = false; $('#request-click').disabled = true; $('#click-marker').hidden = true;
-    $('#selected-position').textContent = '点击截图选择目标位置';
-  } finally { $('#capture-screen').disabled = !state.status.desktop.available; }
-}
-function selectPosition(event) {
-  if (!state.screenshot) return;
-  const rect = $('#screen-image').getBoundingClientRect(), shot = state.screenshot;
-  const x = Math.min(shot.width - 1, Math.max(0, Math.floor((event.clientX - rect.left) / rect.width * shot.width)));
-  const y = Math.min(shot.height - 1, Math.max(0, Math.floor((event.clientY - rect.top) / rect.height * shot.height)));
-  state.position = { x, y }; $('#selected-position').textContent = `选择坐标 (${x}, ${y}) · 左键单击`;
-  $('#click-marker').style.left = `${x / shot.width * 100}%`; $('#click-marker').style.top = `${y / shot.height * 100}%`;
-  $('#click-marker').hidden = false; $('#request-click').disabled = false;
-}
-async function requestClick() {
-  if (state.busy || !state.position || !state.screenshot) return;
-  const action = await post('/api/actions', { session_id: await ensureSession(), tool: 'desktop_click',
-    arguments: { ...state.position, button: 'left', screenshot_id: state.screenshot.id } });
-  await showAction(action);
-}
-async function shareScreen() {
-  if (!state.screenshot) return;
-  state.attachment = state.screenshot.id; $('#screen-attachment').hidden = false;
-  setMode('chat'); await openView('chat'); $('#prompt').focus();
-  toast('本轮消息将附上截图，并发送给配置的模型服务。');
-}
 function renderPlugins() {
   $('#plugin-list').replaceChildren();
-  const icons = { codex_task: ['⌘', 'lavender'], desktop_click: ['▱', 'mint'], remember: ['▦', 'yellow'] };
+  const icons = { codex_task: ['⌘', 'lavender'], desktop_mouse: ['↖', 'mint'], desktop_click: ['↖', 'mint'], remember: ['▦', 'yellow'] };
   state.status.plugins.forEach((plugin) => {
     const card = el('article', 'plugin-card'); const [symbol, color] = icons[plugin.name] || ['◇', 'mint'];
     card.append(el('span', `suggestion-icon ${color}`, symbol), el('h2', '', plugin.title), el('p', '', plugin.description));
@@ -528,9 +544,10 @@ function renderPlugins() {
     card.append(schema);
     if (!plugin.available) card.append(el('small', '', plugin.reason));
     const footer = el('footer'); footer.append(el('span', '', plugin.available ? `● 已连接 · ${automaticMode() ? '默认同意' : '需确认'}` : '○ 尚未连接'));
-    const button = el('button', 'text-button', plugin.name === 'desktop_click' ? '打开桌面 ↗' : plugin.name === 'codex_task' ? '开始任务 ↗' : plugin.name === 'remember' ? '管理记忆 ↗' : '提出请求 ↗');
+    const mousePlugin = ['desktop_click', 'desktop_mouse'].includes(plugin.name);
+    const button = el('button', 'text-button', mousePlugin ? '回聊天控制鼠标 ↗' : plugin.name === 'codex_task' ? '开始任务 ↗' : plugin.name === 'remember' ? '管理记忆 ↗' : '提出请求 ↗');
     button.addEventListener('click', guarded(async () => {
-      if (plugin.name === 'desktop_click') return openView('desktop');
+      if (mousePlugin) { setMode('chat'); await openView('chat'); $('#mouse-control').focus(); return toast('在输入栏开启鼠标控制，再描述要点击、移动或滚动的位置。'); }
       if (plugin.name === 'remember') return openView('memory');
       if (plugin.name === 'codex_task') { setMode('codex'); await openView('chat'); return $('#prompt').focus(); }
       state.plugin = plugin; $('#plugin-title').textContent = plugin.title;
@@ -548,7 +565,7 @@ function renderSettings() {
   const sourceReady = source === 'codex' ? status.model.codex_chat_available : status.model.api_configured;
   [{ title: '日常对话', ready: sourceReady, detail: sourceReady ? (source === 'codex' ? `Codex · CLI 已找到，ChatGPT 登录与会员额度需实际调用验证；${automaticMode() ? '发送即调用。' : '逐次确认。'}` : `${status.model.api_name} · API 配置存在，连接需实际调用验证。`) : '尚未连接，请选择 Codex 登录问答，或配置模型 API。' },
     { title: 'Codex 编程（可选）', ready: status.codex.available, detail: status.codex.available ? `${status.codex.workspace} · ${status.codex.sandbox} · ${status.codex.reason}` : status.codex.reason },
-    { title: '桌面驱动', ready: status.desktop.available, detail: status.desktop.available ? `主屏幕截图与鼠标点击可用，${automaticMode() ? '按授权自动执行' : '需用户确认'}` : status.desktop.reason }].forEach((item) => {
+    { title: '聊天鼠标控制', ready: status.mouse_control?.available === true, detail: status.mouse_control?.available ? `当前${state.mouseControl.enabled ? '开启' : '关闭'}；通过聊天输入栏开关授权，仅明确鼠标指令触发截图和单次操作。` : status.mouse_control?.reason || status.desktop.reason }].forEach((item) => {
     const row = el('div', 'connection-row'); const info = el('div'); info.append(el('strong', '', item.title), el('small', '', item.detail));
     row.append(el('span', `status-dot${item.ready ? '' : ' off'}`), info); $('#settings-status').append(row);
   });
@@ -592,6 +609,7 @@ async function syncViews() {
   state.syncing = true;
   const observedSession = state.session;
   try {
+    await refreshStatus();
     if (usingCodex() && Date.now() - codexLastAttempt > 30000) void connectCodex();
     const sessions = await refreshSessions();
     if (state.session === observedSession && state.session && !sessions.some(item => item.id === state.session)) { state.session = null; resetChat(); }
@@ -683,12 +701,7 @@ $('#clear-memory').addEventListener('click', guarded(async () => {
   await json('/api/memories', { method: 'DELETE' }); state.session = null; resetChat();
   await refreshSessions(); await renderMemories(); toast('所有记忆及历史对话已清空。');
 }));
-$('#capture-screen').addEventListener('click', guarded(captureScreen));
-$('#screen-image').addEventListener('click', selectPosition);
-$('#request-click').addEventListener('click', guarded(requestClick));
-$('#share-screen').addEventListener('click', guarded(shareScreen));
-$('#attach-screen').addEventListener('click', guarded(() => openView('desktop')));
-$('#remove-attachment').addEventListener('click', () => { state.attachment = null; $('#screen-attachment').hidden = true; });
+$('#mouse-control').addEventListener('click', guarded(toggleMouseControl));
 $('#decline-action').addEventListener('click', guarded(declineAction));
 $('#close-action').addEventListener('click', guarded(declineAction));
 $('#action-dialog').addEventListener('cancel', (event) => { event.preventDefault(); guarded(declineAction)(); });

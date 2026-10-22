@@ -18,6 +18,7 @@ import uvicorn
 
 from .config import Settings
 from .server import create_app
+from .single_instance import SingleInstance
 
 
 def configuration_directory():
@@ -142,7 +143,7 @@ def update_location_safe(install_dir, config_file, settings):
     return not any(path.resolve().is_relative_to(install_dir.resolve()) for path in protected)
 
 
-def run_window(settings, config_file, *, webview_module=None, debug=False):
+def run_window(settings, config_file, *, webview_module=None, debug=False, instance=None):
     if webview_module is None:
         try:
             import webview as webview_module
@@ -205,6 +206,8 @@ def run_window(settings, config_file, *, webview_module=None, debug=False):
         # Closing the native window cancels active streams and owned Codex subprocesses.
         window.events.closing += service.stop
         window.events.shown += service.on_window_shown
+        if instance is not None:
+            window.events.shown += lambda: instance.set_window(window)
         menu = [Menu("夏鱼洛", [
             MenuAction("打开配置目录", lambda: open_directory(Path(config_file).parent)),
             MenuAction("打开日志目录", lambda: open_directory(Path(settings.data_dir))),
@@ -229,7 +232,11 @@ def show_error(message):
 
 def main(debug=False):
     directory = configuration_directory()
+    instance = None
     try:
+        instance = SingleInstance()
+        if not instance.acquire():
+            return 0  # Existing session owner has been asked to show its window.
         settings, config_file = prepare_settings(directory)
         Path(settings.data_dir).mkdir(parents=True, exist_ok=True)
         handler = RotatingFileHandler(Path(settings.data_dir) / "desktop.log",
@@ -243,7 +250,7 @@ def main(debug=False):
             if sys.stderr is None:
                 logging.getLogger("pywebview").handlers.clear()
                 logging.getLogger("pywebview").propagate = True
-            run_window(settings, config_file, debug=debug)
+            run_window(settings, config_file, debug=debug, instance=instance)
         finally:
             root.removeHandler(handler)
             handler.close()
@@ -253,3 +260,6 @@ def main(debug=False):
                    f"配置目录：{directory}\n如没有图形桌面，可使用 python -m assistant --serve 进行后端开发。")
         show_error(message)
         return 1
+    finally:
+        if instance is not None:
+            instance.close()

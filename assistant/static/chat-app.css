@@ -92,26 +92,26 @@ body:not(.developer-mode) .composer textarea::placeholder { color: #7b8d76; }
 body:not(.developer-mode) .composer-toolbar { margin-top: 10px; gap: 10px; }
 body:not(.developer-mode) .composer-tools { gap: 14px; }
 body:not(.developer-mode) .mode-pill { font-size: 11px; padding: 6px 9px; background: #f1f6ee; color: #6c916d; border: 0; border-radius: 8px; }
-body:not(.developer-mode) .tool-button { color: #91a18b; }
-body:not(.developer-mode) .tool-button span { font-size: 11px; }
+body:not(.developer-mode) .mouse-control { color: #71866b; border-color: #dce5d6; border-radius: 8px; font-size: 11px; }
+body:not(.developer-mode) .mouse-control[aria-pressed="true"] { color: #35734d; border-color: #9fc6a8; background: #eaf5e8; }
+body:not(.developer-mode) .mouse-control-note { color: #799174; }
 body:not(.developer-mode) .send-tools small { color: #adb9a7; font: 9px "Microsoft YaHei", sans-serif; }
 body:not(.developer-mode) .send-button { width: 33px; height: 33px; border-radius: 50%; color: #fff; background: #438a5d; font-size: 23px; }
 body:not(.developer-mode) .stop-button { background: #f7eeec; color: #ac7265; border-color: #eedcd5; border-radius: 9px; }
 body:not(.developer-mode) .composer-caption { justify-content: center; color: #a4b09d; font: 9px "Microsoft YaHei", sans-serif; gap: 18px; margin-top: 13px; }
 body:not(.developer-mode) .retrieval-note { color: #739075; font-size: 10px; }
-body:not(.developer-mode) .attachment { background: #f0f6ed; color: #62866b; border-color: #dbe8d5; border-radius: 10px; }
 body:not(.developer-mode) .content-view { padding: 35px; }
 body:not(.developer-mode) .page-heading { max-width: 960px; }
 body:not(.developer-mode) .page-heading h1 { font-size: 25px; color: #3e5740; font-weight: 550; }
 body:not(.developer-mode) .eyebrow { font: 10px "Segoe UI", sans-serif; color: #96a894; letter-spacing: 2px; }
-body:not(.developer-mode) .page-heading p, body:not(.developer-mode) .section-note, body:not(.developer-mode) .info-grid p, body:not(.developer-mode) .plugin-card > p, body:not(.developer-mode) .settings-card p, body:not(.developer-mode) .screen-empty p { color: #6d8066; font-size: 12px; }
+body:not(.developer-mode) .page-heading p, body:not(.developer-mode) .section-note, body:not(.developer-mode) .plugin-card > p, body:not(.developer-mode) .settings-card p { color: #6d8066; font-size: 12px; }
 body:not(.developer-mode) .primary-button { background: #438a5d; color: #fff; border-radius: 9px; font-size: 12px; padding: 10px 15px; }
 body:not(.developer-mode) .primary-button:hover { background: #33794f; }
 body:not(.developer-mode) .secondary-button { color: #6e856a; background: #fff; border-color: #dfe7dc; border-radius: 9px; font-size: 12px; }
 body:not(.developer-mode) .secondary-button:hover { background: #f1f5ed; }
 body:not(.developer-mode) .text-button { color: #618c64; font-size: 11px; }
 body:not(.developer-mode) .badge, body:not(.developer-mode) .mini-tag { color: #8ba484; border-color: #dce6d8; background: #f4f7ef; border-radius: 6px; }
-body:not(.developer-mode) .level-card, body:not(.developer-mode) .memory-card, body:not(.developer-mode) .screen-card, body:not(.developer-mode) .plugin-card, body:not(.developer-mode) .connection-row, body:not(.developer-mode) .settings-card { border-color: #e2e9de; border-radius: 14px; background: #fff; }
+body:not(.developer-mode) .level-card, body:not(.developer-mode) .memory-card, body:not(.developer-mode) .plugin-card, body:not(.developer-mode) .connection-row, body:not(.developer-mode) .settings-card { border-color: #e2e9de; border-radius: 14px; background: #fff; }
 body:not(.developer-mode) .level-card { padding: 20px 16px; }
 body:not(.developer-mode) .level-card.selected { background: #f2f8ee; border-color: #a3c699; }
 body:not(.developer-mode) .level-card > span, body:not(.developer-mode) .level-card small, body:not(.developer-mode) .memory-card-top, body:not(.developer-mode) .memory-card-footer small { color: #92a58b; }
@@ -122,9 +122,6 @@ body:not(.developer-mode) .section-heading h2, body:not(.developer-mode) .settin
 body:not(.developer-mode) .empty-state { color: #9aab92; border-color: #d8e3d1; border-radius: 12px; }
 body:not(.developer-mode) .notice { background: #fbf8ef; color: #ab996e; border-color: #ede4cd; border-radius: 10px; }
 body:not(.developer-mode) .notice.ready { background: #eff7ed; color: #7a9a71; border-color: #d5e6cb; }
-body:not(.developer-mode) .screen-toolbar, body:not(.developer-mode) .screen-footer { color: #8b9e81; font-size: 11px; }
-body:not(.developer-mode) .screen-empty h3 { color: #6e8566; }
-body:not(.developer-mode) .screen-empty > span { color: #b1c3a8; }
 body:not(.developer-mode) .plugin-card h2 { color: #546d4b; }
 body:not(.developer-mode) .plugin-card small { color: #a89b72; font-size: 11px; }
 body:not(.developer-mode) .plugin-card footer { color: #7ca074; font-size: 11px; }
@@ -176,14 +173,14 @@ body:not(.developer-mode) .composer { border-radius: 16px; padding: 13px 12px 11
 body:not(.developer-mode) .composer textarea { font-size: 12px; }
 body:not(.developer-mode) .composer-tools { gap: 9px; }
 body:not(.developer-mode) .mode-pill { font-size: 9px; padding: 6px; }
-body:not(.developer-mode) .tool-button span, body:not(.developer-mode) .send-tools small { display: none; }
+body:not(.developer-mode) .mouse-control { font-size: 9px; padding: 6px; }
+body:not(.developer-mode) .send-tools small { display: none; }
 body:not(.developer-mode) .composer-caption { flex-wrap: wrap; font-size: 8px; gap: 3px 12px; }
 body:not(.developer-mode) .content-view { padding: 24px 16px; }
 body:not(.developer-mode) .page-heading { flex-wrap: wrap; }
 body:not(.developer-mode) .page-heading h1 { font-size: 21px; }
 body:not(.developer-mode) .memory-levels { grid-template-columns: 1fr 1fr; gap: 8px; }
 body:not(.developer-mode) .level-card { padding: 14px 10px; }
-body:not(.developer-mode) .screen-footer { flex-wrap: wrap; }
 body:not(.developer-mode) .preference-card { padding: 17px; }
 }
 .download-update-link { display: inline-flex; align-items: center; text-decoration: none; }

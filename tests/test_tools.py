@@ -67,6 +67,7 @@ def test_desktop_api_proposal_does_not_click(client_factory):
     tool = desktop()
     client.app.state.desktop.enabled = True
     client.app.state.desktop.driver = tool.driver
+    assert client.post('/api/mouse-control', json={'enabled': True}).status_code == 200
     session = client.post('/api/sessions').json()['id']
     screenshot = client.post('/api/desktop/screenshot').json()
     action = client.post('/api/actions', json={'session_id': session, 'tool': 'desktop_click',

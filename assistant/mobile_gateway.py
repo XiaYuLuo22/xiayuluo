@@ -88,7 +88,9 @@ def gateway(core, devices, token, automation):
             except ValueError as error:
                 raise HTTPException(422, "消息格式不正确。") from error
             if not isinstance(data, dict) or data.get("screenshot_id") is not None:
-                raise HTTPException(403, "手机不能读取或转发电脑截图。请在电脑端主动附图。")
+                raise HTTPException(403, "手机不能读取或转发电脑截图。请在电脑对话栏使用鼠标控制。")
+            if data.get("mouse_control"):
+                raise HTTPException(403, "手机不能开启电脑鼠标控制或读取屏幕；请在电脑对话栏操作此开关。")
         return Forward(core, token, "/api/" + path, body, device_id=device["id"])
 
     return app

@@ -21,7 +21,6 @@
       <nav aria-label="主导航">
         <button class="nav-item active" data-view="chat" title="聊天"><span class="nav-icon">◌</span><span>聊天</span></button>
         <button class="nav-item" data-view="memory" title="记忆"><span class="nav-icon">▦</span><span>记忆</span></button>
-        <button class="nav-item" data-view="desktop" title="屏幕助手"><span class="nav-icon">▱</span><span>屏幕助手</span></button>
         <button class="nav-item" data-view="plugins" title="工具箱"><span class="nav-icon">◇</span><span>工具箱</span></button>
         <button class="nav-item" data-view="tasks" title="待确认任务"><span class="nav-icon">☑</span><span>待确认任务</span></button>
         <button class="nav-item" data-view="devices" title="设备与同步"><span class="nav-icon">⌁</span><span>设备与同步</span></button>
@@ -61,7 +60,6 @@
             <div class="suggestions">
               <button data-suggestion="我想和你聊聊今天发生的事。"><span class="suggestion-icon mint">◌</span><strong>随便聊聊</strong><small>分享日常，理清思绪</small><span class="arrow">↗</span></button>
               <button data-suggestion="帮我分析当前项目的结构和启动方式，先给出检查计划。" data-mode="codex"><span class="suggestion-icon lavender">⌘</span><strong>一起写代码</strong><small>把编程任务交给 Codex</small><span class="arrow">↗</span></button>
-              <button data-open="desktop"><span class="suggestion-icon peach">▱</span><strong>帮我看屏幕</strong><small>看截图，确认后帮你点击</small><span class="arrow">↗</span></button>
               <button data-open="memory"><span class="suggestion-icon yellow">▦</span><strong>让你更懂我</strong><small>管理偏好和四级记忆</small><span class="arrow">↗</span></button>
             </div>
             <button id="connection-hint" class="connection-hint" data-open="settings" hidden>连接对话模型，开始第一次聊天 <span>去设置 →</span></button>
@@ -70,13 +68,13 @@
         </div>
         <div class="composer-wrap">
           <div id="retrieval-note" class="retrieval-note" hidden></div>
-          <div id="screen-attachment" class="attachment" hidden><span>▱ 已附上主屏幕截图 · 将发送给模型</span><button id="remove-attachment" aria-label="移除截图">×</button></div>
           <form id="chat-form" class="composer">
             <label class="sr-only" for="prompt">输入消息</label>
             <textarea id="prompt" rows="2" maxlength="12000" placeholder="和夏鱼洛聊聊，或交给我一件事…"></textarea>
-            <div class="composer-toolbar"><div class="composer-tools"><button type="button" id="mode-toggle" class="mode-pill">◌ 日常对话 <span>⌄</span></button><button type="button" id="attach-screen" class="tool-button" title="查看并附上本机截图">▱ <span>附上屏幕</span></button></div><div class="send-tools"><small>Enter 发送 · Shift Enter 换行</small><button type="submit" id="send" class="send-button" aria-label="发送消息">↑</button><button type="button" id="stop" class="stop-button" hidden>■ 停止</button></div></div>
+            <div class="composer-toolbar"><div class="composer-tools"><button type="button" id="mode-toggle" class="mode-pill">◌ 日常对话 <span>⌄</span></button><button type="button" id="mouse-control" class="mouse-control" aria-pressed="false" aria-describedby="mouse-control-note" disabled>鼠标控制：关</button></div><div class="send-tools"><small>Enter 发送 · Shift Enter 换行</small><button type="submit" id="send" class="send-button" aria-label="发送消息">↑</button><button type="button" id="stop" class="stop-button" hidden>■ 停止</button></div></div>
           </form>
-          <div class="composer-caption"><span>回答可能有误，请核实重要信息</span><span>工具操作由你确认</span></div>
+          <div id="mouse-control-note" class="mouse-control-note" role="status" aria-live="polite">正在读取本机鼠标控制状态…</div>
+          <div class="composer-caption"><span>回答可能有误，请核实重要信息</span><span>鼠标操作须开启聊天开关</span></div>
         </div>
       </section>
 
@@ -86,13 +84,6 @@
         <div class="section-heading"><h2 id="memory-list-title">一级记忆</h2><button id="clear-memory" class="text-button danger">清空全部记忆与对话</button></div>
         <p class="section-note">一级保留 7 天；累计检索 3 次晋升二级。二级保留 30 天，检索后续期；永久层只由你确认。过期内容不再被自动检索。</p>
         <div id="memory-list" class="memory-list"></div>
-      </section>
-
-      <section id="view-desktop" class="view content-view" hidden>
-        <div class="page-heading"><div><div class="eyebrow">SCREEN ASSISTANT</div><h1>一起看看你的屏幕</h1><p>主动获取截图，选好位置，按设置的执行方式点击。</p></div><button id="capture-screen" class="primary-button">▱ 获取截图</button></div>
-        <div class="notice" id="desktop-notice"></div>
-        <div class="screen-card"><div class="screen-toolbar"><span id="screen-dimensions">主屏幕 · 尚未截图</span><span class="mini-tag">APPROVAL REQUIRED</span></div><div id="screen-empty" class="screen-empty"><span>▱</span><h3>等待本机截图</h3><p>截图仅在本机展示。主动附到对话后，才会发送给模型。</p></div><div id="screen-container" class="screen-container" hidden><img id="screen-image" alt="本机主屏幕截图，点击图片可选择坐标"><span id="click-marker" class="click-marker" hidden>＋</span></div><div class="screen-footer"><span id="selected-position">先获取截图，再选择目标位置</span><div><button id="share-screen" class="secondary-button" disabled>附到对话</button><button id="request-click" class="primary-button" disabled>提出点击请求</button></div></div></div>
-        <div class="info-grid"><article><span>01</span><h3>明确范围</h3><p>首版仅控制主屏幕，支持单次左键或右键点击。</p></article><article><span>02</span><h3>确认每一步</h3><p>执行前展示坐标；截图过期或目标变化时需重新选择。</p></article><article><span>03</span><h3>随时中止</h3><p>将鼠标移到主屏幕左上角可触发 PyAutoGUI 紧急停止。</p></article></div>
       </section>
 
       <section id="view-plugins" class="view content-view" hidden>
@@ -159,7 +150,7 @@ DESKTOP_ENABLED=true</pre><p>Codex 使用本机安装的 CLI：先运行 <code>n
   </div>
   <footer class="statusbar developer-only"><div><span class="status-dot"></span>夏鱼洛 <span id="footer-runtime">local runtime</span></div><div><span id="footer-session">无活动会话</span><span id="footer-events">0 events</span><span>UTF-8</span></div></footer>
   <dialog id="memory-dialog"><form id="memory-form"><div class="dialog-heading"><h2>添加记忆</h2><button type="button" data-close="memory-dialog" aria-label="关闭">×</button></div><p>仅记录你希望助手记住的内容，避免填写密钥等敏感信息。</p><label>保留层级<select id="memory-tier"><option value="first">一级 · 7 天</option><option value="second" selected>二级 · 30 天</option><option value="permanent">永久 · 直到手动删除</option></select></label><label>内容类型<select id="memory-kind"><option value="fact">事实 / 偏好</option><option value="procedure">做事方法</option><option value="episode">经历 / 片段</option></select></label><label>记忆内容<textarea id="memory-content" rows="4" maxlength="2000" required placeholder="例如：我喜欢直接、简洁的回答。"></textarea></label><button type="submit" class="primary-button">确认保存</button></form></dialog>
-  <dialog id="action-dialog"><div class="dialog-heading"><h2 id="action-title">确认操作</h2><button type="button" id="close-action" aria-label="拒绝操作">×</button></div><p id="action-description"></p><pre id="action-details"></pre><p class="section-note">请求在 2 分钟后过期。已开始的屏幕单次点击无法撤回。</p><div class="dialog-footer"><button id="decline-action" class="secondary-button">取消</button><button id="approve-action" class="primary-button">确认执行</button></div></dialog>
+  <dialog id="action-dialog"><div class="dialog-heading"><h2 id="action-title">确认操作</h2><button type="button" id="close-action" aria-label="拒绝操作">×</button></div><p id="action-description"></p><pre id="action-details"></pre><p class="section-note">请求在 2 分钟后过期。已开始的单次鼠标操作无法撤回。</p><div class="dialog-footer"><button id="decline-action" class="secondary-button">取消</button><button id="approve-action" class="primary-button">确认执行</button></div></dialog>
   <dialog id="plugin-dialog"><form id="plugin-form"><div class="dialog-heading"><h2 id="plugin-title"></h2><button type="button" data-close="plugin-dialog" aria-label="关闭">×</button></div><p>填写插件参数，提交后仍需确认执行。</p><label>JSON 参数<textarea id="plugin-arguments" rows="7" required spellcheck="false"></textarea></label><button class="primary-button" type="submit">提出操作请求</button></form></dialog>
   <div id="toast" class="toast" role="status" hidden></div>
 </body>

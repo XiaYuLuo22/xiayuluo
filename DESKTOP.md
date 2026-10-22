@@ -1,10 +1,16 @@
 # 夏鱼洛 Windows 桌面 App
 
-夏鱼洛以独立桌面窗口运行，不需要手动打开浏览器、输入端口或启动服务。默认是面向日常使用的聊天 App，提供会话搜索、流式回复、复制、四级记忆、Codex 和屏幕协助；调试工作台在「设置 → 开发者模式」按需开启。
+夏鱼洛以独立桌面窗口运行，不需要手动打开浏览器、输入端口或启动服务。默认是面向日常使用的聊天 App，提供会话搜索、流式回复、复制、四级记忆、Codex 和聊天内鼠标控制；调试工作台在「设置 → 开发者模式」按需开启。
 
 界面由 pywebview 和系统 WebView2 呈现，仍复用现有 HTML/CSS/JS 组件，**不是将所有控件重写为 Win32 原生控件**。应用拥有自己的进程、窗口、配置和本地服务。它不使用远程网页，也不依赖 CDN。
 
-## 0.1.9 日常使用：安装器与桌面图标
+## 0.1.10：单实例与聊天鼠标开关
+
+同一 Windows 登录会话只能打开一个夏鱼洛 GUI；再次点击桌面/开始菜单/其他副本时通知已有窗口恢复并显示，第二个启动程序直接退出，不再启动第二套本地服务。正常退出或进程结束自动释放内核锁，不依赖残留 PID 文件、不结束其他程序。开发用 `--serve` 不属于 GUI 实例，勿同时占用手机同步端口。云端单元测试不代替实际 Windows 前台聚焦验收。
+
+不再有独立「屏幕助手」页面。聊天输入栏开启「鼠标控制」后，发送 `请点击“设置”按钮` 等明确文字指令，临时取一张主屏幕截图交给所选 Codex/视觉 API 定位，再由本机校验并执行一次。普通聊天不截图，服务重启后开关关闭；关掉开关取消规划并作废旧截图，已发生操作不能撤回。支持点击/右键/双击/移动/有限滚动，不支持键盘、手机/语音授权和自主多步操作。详见 [CODEX_CHAT.md](CODEX_CHAT.md)。Windows首次空白配置已启用驱动；若旧 `.env` 显式 `DESKTOP_ENABLED=false`，仍尊重该配置，需改为 true 后重启。
+
+## 日常使用：安装器与桌面图标
 
 源码保持私有。登录有权限的 GitHub 账号，打开 Windows Actions 的**成功运行**，下载 `Xiayuluo-Windows` artifact，完整解压后双击 `Xiayuluo-Setup.exe`，按图形向导安装。存在 E 盘时默认 `E:\Xiayuluo`，否则使用用户目录 `Programs\Xiayuluo`，均可在向导中选择其他可写位置；无需管理员权限、Python 或 CMD。以后双击桌面「夏鱼洛」或开始菜单图标即可，直接目标是 `Xiayuluo.exe`。未做 Windows 代码签名，系统可能提示 SmartScreen；WebView2 与 Codex 首次登录仍需系统/官方流程。
 
@@ -36,7 +42,7 @@ py -3 -m venv .venv
 
 `start.cmd` 会保留一个启动窗口用于安装和错误诊断，App 仍在独立桌面窗口中运行；正常关闭 App 后启动窗口退出。安装完成后也可以使用 `xiayuluo-app` 或直接运行 `.venv\Scripts\pythonw.exe -m assistant` 无控制台启动，但这种方式不会自动修复依赖。
 
-源码模式沿用项目目录的 `.env` 和 `.assistant` 记忆数据。首次启动仅在 `.env` 不存在时从空白模板生成配置，不会覆盖已有配置。Windows 首次生成的模板会启用桌面驱动；截图和点击仍需要用户主动操作及确认。
+源码模式沿用项目目录的 `.env` 和 `.assistant` 记忆数据。首次启动仅在 `.env` 不存在时从空白模板生成配置，不会覆盖已有配置。Windows 首次生成的模板会启用桌面驱动；聊天栏鼠标开关仍默认关闭，开启并明确提出指令后按当前 auto/manual 策略执行。
 
 ## 生成可分发的 .exe
 
@@ -62,7 +68,7 @@ py -3 -m venv .venv
 .\build-app.cmd --output-dir dist\desktop-next
 ```
 
-构建中间文件使用临时目录，完成或失败后自动清理；用户的 `.env`、API 密钥、记忆数据库和 Codex 凭据不会打包。发行包附带依赖许可证与第三方说明。当前是文件夹式发行包，没有安装向导、Windows 代码签名或开机自启。0.1.1 起包含更新 helper，可在设置中确认下载、重启升级；仍需正式发布更新源和 Windows 验收，见 [UPDATES.md](UPDATES.md)。更新清单签名不是 Windows Authenticode，系统仍可能提示 SmartScreen。
+构建中间文件使用临时目录，完成或失败后自动清理；用户的 `.env`、API 密钥、记忆数据库和 Codex 凭据不会打包。发行包附带依赖许可证与第三方说明。普通脚本生成文件夹式发行包；`--installer` 另外生成 Inno Setup 安装向导，没有 Windows 代码签名或开机自启。0.1.1 起包含更新 helper，可在设置中确认下载、重启升级；仍需正式发布更新源和 Windows 验收，见 [UPDATES.md](UPDATES.md)。更新清单签名不是 Windows Authenticode，系统仍可能提示 SmartScreen。
 
 源码推送到 `main` 后会自动运行 **Build Windows desktop app**，也可在 Actions 手动运行；成功后下载 `Xiayuluo-Windows` artifact。工作流只读仓库，不需要模型密钥或发布私钥，不创建公开 Release。解开 artifact 后，再解压里面的 `Xiayuluo-Windows.zip` 到 E 盘，双击 `Xiayuluo/Xiayuluo.exe`。以 Actions 的实际状态为准，源码推送成功不等于 Windows 构建或本机启动已经验收。
 
@@ -91,7 +97,7 @@ DESKTOP_ENABLED=true
 
 内部服务只绑定本机回环地址，默认使用自动分配的端口。显式设置 `MOBILE_ENABLED=true` 时使用 `ASSISTANT_PORT`（默认 8765），供受控 HTTPS 代理连接；手机同步默认关闭，配置和权限边界见 [MOBILE.md](MOBILE.md)。`--serve` 也使用该固定端口，不要与手机模式的 App 同时运行。关闭窗口会确认退出，停止本 App 的服务和活动任务；已执行的点击、已写入的代码变更不会撤回。
 
-外部文档链接由系统浏览器打开；日志导出使用原生保存对话框。API 仍使用同源检查和本地会话令牌，插件仍走用户确认流程，没有新增可以直接执行任意 Python 的页面桥接。
+外部文档链接由系统浏览器打开；日志导出使用原生保存对话框。API 仍使用同源检查和本地会话令牌，插件遵循设置中的 auto/manual 策略，没有新增可以直接执行任意 Python 的页面桥接。
 
 ## 开发模式与验证范围
 

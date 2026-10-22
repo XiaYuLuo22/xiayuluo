@@ -141,6 +141,7 @@ def test_auto_click_preserves_snapshot_guards(client_factory, target):
     client, _ = client_factory(handler=lambda request: httpx.Response(200, text=tool_stream('desktop_click', arguments)), approval_mode='auto')
     desktop = client.app.state.desktop
     desktop.enabled, desktop.driver = True, FakeDesktop()
+    assert client.post('/api/mouse-control', json={'enabled': True}).status_code == 200
     snapshot = client.post('/api/desktop/screenshot').json()
     arguments.update(x=30, y=40, screenshot_id=snapshot['id'])
     if target == 'changed': desktop.driver.image.putpixel((30, 40), (0, 0, 0))

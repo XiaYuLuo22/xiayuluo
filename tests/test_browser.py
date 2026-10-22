@@ -144,7 +144,7 @@ def test_browser_shared_workspace_and_bound_confirmation(page, browser_app):
     playwright_api.expect(page.locator('#action-details')).to_contain_text('目录或权限改变后必须重新提交')
 
 
-def test_browser_auto_mode_direct_chat_and_click_without_dialog(page, browser_app):
+def test_browser_auto_mode_direct_chat_without_dialog(page, browser_app):
     _, app = browser_app
     dialogs = []
     page.on('dialog', lambda dialog: (dialogs.append(dialog.message), dialog.dismiss()))
@@ -160,13 +160,6 @@ def test_browser_auto_mode_direct_chat_and_click_without_dialog(page, browser_ap
     playwright_api.expect(page.locator('#stop')).to_be_hidden()
     assert page.locator('.action-card').count() == 0
     playwright_api.expect(page.locator('#action-dialog')).not_to_be_visible()
-    page.locator('[data-view="desktop"]').click()
-    page.locator('#capture-screen').click()
-    playwright_api.expect(page.locator('#screen-image')).to_be_visible()
-    page.locator('#screen-image').click(position={'x': 40, 'y': 40})
-    page.locator('#request-click').click()
-    playwright_api.expect(page.locator('.message.assistant .message-body').last).to_contain_text('已执行左键点击')
-    assert len(app.state.desktop.driver.clicks) == 1
     assert not dialogs
     playwright_api.expect(page.locator('#action-dialog')).not_to_be_visible()
     page.locator('[data-view="settings"]').click()
@@ -198,18 +191,210 @@ def test_browser_automatically_identifies_codex_login_on_open_without_model_requ
     assert not app.state.model_requests and not app.state.memory.sessions()
 
 
-def test_browser_desktop_requires_confirmation(page, browser_app):
+def test_browser_legacy_mouse_task_still_requires_confirmation(page, browser_app):
     _, app = browser_app
-    page.locator('[data-view="desktop"]').click()
-    page.locator('#capture-screen').click()
-    playwright_api.expect(page.locator('#screen-image')).to_be_visible()
-    page.locator('#screen-image').click(position={'x': 40, 'y': 40})
-    page.locator('#request-click').click()
+    # Old pending tasks remain readable, without restoring the removed screenshot page.
+    session = page.evaluate("post('/api/sessions')")['id']
+    action = {'id': 'legacy-click', 'session_id': session, 'tool': 'desktop_click',
+              'title': '桌面点击', 'arguments': {'x': 30, 'y': 40, 'button': 'left', 'screenshot_id': 'legacy-shot'}}
+    page.route('**/api/actions', lambda route: route.fulfill(json=[action]))
+    page.route('**/api/actions/legacy-click/approve', lambda route: route.fulfill(
+        content_type='text/event-stream', body='data: {"type":"text","text":"旧请求已处理"}\n\ndata: {"type":"done"}\n\n'))
+    page.locator('[data-view="tasks"]').click()
+    page.locator('#pending-tasks button').click()
     playwright_api.expect(page.locator('#action-dialog')).to_be_visible()
+    playwright_api.expect(page.locator('#action-details')).to_contain_text('legacy-shot')
+    playwright_api.expect(page.locator('#action-details')).to_contain_text('(30, 40)')
     assert app.state.desktop.driver.clicks == []
     page.locator('#approve-action').click()
-    playwright_api.expect(page.locator('.message.assistant .message-body').last).to_contain_text('已执行左键点击')
-    assert len(app.state.desktop.driver.clicks) == 1
+    playwright_api.expect(page.locator('.message.assistant .message-body').last).to_contain_text('旧请求已处理')
+    assert app.state.desktop.driver.clicks == []
+
+
+def stub_mouse_control(page, *, enabled=False, available=True):
+    """Test UI consent against a controlled server, without taking real screenshots."""
+    control = {'enabled': enabled, 'available': available, 'reason': '', 'fail': False}
+    calls = []
+
+    def status_route(route):
+        response = route.fetch()
+        status = response.json()
+        status['mouse_control'] = {key: value for key, value in control.items() if key != 'fail'}
+        route.fulfill(response=response, json=status)
+
+    def control_route(route):
+        body = route.request.post_data_json
+        calls.append(body)
+        if control['fail']:
+            return route.fulfill(status=503, json={'detail': '测试服务拒绝切换'})
+        control['enabled'] = body['enabled']
+        route.fulfill(json={key: value for key, value in control.items() if key != 'fail'})
+
+    page.route('**/api/status*', status_route)
+    page.route('**/api/mouse-control', control_route)
+    page.reload()
+    playwright_api.expect(page.locator('#mouse-control')).to_have_attribute('aria-pressed', str(enabled).lower())
+    playwright_api.expect(page.locator('#mouse-control-note')).not_to_contain_text('正在读取')
+    return control, calls
+
+
+def stub_chat(page):
+    requests = []
+
+    def chat_route(route):
+        requests.append(route.request.post_data_json)
+        route.fulfill(content_type='text/event-stream', body='data: {"type":"text","text":"已收到指令"}\n\ndata: {"type":"done"}\n\n')
+
+    page.route('**/api/chat', chat_route)
+    return requests
+
+
+def test_browser_mouse_default_off_no_separate_screen_and_narrow_layout(page):
+    _, calls = stub_mouse_control(page)
+    requests = stub_chat(page)
+    screenshots = []
+    page.on('request', lambda request: screenshots.append(request.url) if '/api/desktop/' in request.url else None)
+    switch = page.locator('#mouse-control')
+    playwright_api.expect(switch).to_have_text('鼠标控制：关')
+    assert page.locator('[data-view="desktop"], [data-open="desktop"], #view-desktop, #attach-screen, #capture-screen').count() == 0
+    page.locator('#prompt').fill('你好，今天怎么样')
+    with page.expect_response('**/api/chat'):
+        page.locator('#send').click()
+    playwright_api.expect(page.locator('#stop')).to_be_hidden()
+    assert requests[-1]['mouse_control'] is False
+    assert 'screenshot_id' not in requests[-1]
+    assert not calls and not screenshots
+    page.set_viewport_size({'width': 390, 'height': 844})
+    playwright_api.expect(switch).to_be_visible()
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    enable_developer(page)
+    playwright_api.expect(switch).to_be_visible()
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+
+
+def test_browser_mouse_toggle_failure_uses_real_status(page):
+    control, calls = stub_mouse_control(page)
+    control['fail'] = True
+    page.locator('#mouse-control').click()
+    playwright_api.expect(page.locator('#toast')).to_contain_text('设置失败')
+    playwright_api.expect(page.locator('#mouse-control')).to_have_attribute('aria-pressed', 'false')
+    control['fail'] = False
+    page.locator('#mouse-control').click()
+    playwright_api.expect(page.locator('#mouse-control')).to_have_attribute('aria-pressed', 'true')
+    control['fail'] = True
+    page.locator('#mouse-control').click()
+    playwright_api.expect(page.locator('#mouse-control-note')).to_contain_text('仅明确的鼠标指令')
+    playwright_api.expect(page.locator('#mouse-control')).to_have_attribute('aria-pressed', 'true')
+    assert calls == [{'enabled': True}, {'enabled': True}, {'enabled': False}]
+
+
+def test_browser_mouse_unavailable_cannot_enable(page):
+    control, calls = stub_mouse_control(page, available=False)
+    control['reason'] = '测试桌面驱动不可用'
+    page.reload()
+    playwright_api.expect(page.locator('#mouse-control')).to_be_disabled()
+    playwright_api.expect(page.locator('#mouse-control-note')).to_contain_text('测试桌面驱动不可用')
+    assert not calls
+
+
+def test_browser_mouse_on_chat_flag_but_not_programming(page):
+    _, calls = stub_mouse_control(page)
+    requests = stub_chat(page)
+    dialogs = []
+    page.on('dialog', lambda dialog: (dialogs.append(dialog.message), dialog.dismiss()))
+    page.locator('#mouse-control').click()
+    playwright_api.expect(page.locator('#mouse-control')).to_have_text('鼠标控制：开')
+    playwright_api.expect(page.locator('#mouse-control-note')).to_contain_text('不是持续录屏')
+    page.locator('#prompt').fill('点击屏幕右上角的关闭按钮')
+    with page.expect_response('**/api/chat'):
+        page.locator('#send').click()
+    playwright_api.expect(page.locator('#stop')).to_be_hidden()
+    assert requests[-1]['mouse_control'] is True
+    assert 'screenshot_id' not in requests[-1]
+    page.locator('[data-view="settings"]').click()
+    page.locator('#chat-provider').select_option('codex')
+    page.locator('[data-view="chat"]').click()
+    page.locator('#prompt').fill('移动鼠标到屏幕中央')
+    with page.expect_response('**/api/chat'):
+        page.locator('#send').click()
+    playwright_api.expect(page.locator('#stop')).to_be_hidden()
+    assert requests[-1]['provider'] == 'codex' and requests[-1]['mouse_control'] is True
+    page.locator('#mode-toggle').click()
+    # An already-enabled switch can still be revoked while in programming mode.
+    playwright_api.expect(page.locator('#mouse-control')).to_be_enabled()
+    page.locator('#prompt').fill('检查项目')
+    with page.expect_response('**/api/chat'):
+        page.locator('#send').click()
+    playwright_api.expect(page.locator('#stop')).to_be_hidden()
+    assert requests[-1]['mode'] == 'codex' and requests[-1]['mouse_control'] is False
+    page.locator('#mouse-control').click()
+    playwright_api.expect(page.locator('#mouse-control')).to_have_attribute('aria-pressed', 'false')
+    playwright_api.expect(page.locator('#mouse-control')).to_be_disabled()
+    assert calls == [{'enabled': True}, {'enabled': False}] and not dialogs
+
+
+def test_browser_mouse_busy_off_revokes_before_aborting(page):
+    _, calls = stub_mouse_control(page)
+    page.locator('#mouse-control').click()
+    playwright_api.expect(page.locator('#mouse-control')).to_have_attribute('aria-pressed', 'true')
+    # Keep a deterministic local stream open until AbortController cancels it.
+    page.evaluate('''() => {
+        const original = window.fetch;
+        window.mouseTimeline = [];
+        window.fetch = (path, options) => {
+            if (path === '/api/chat') {
+                window.mouseChatBody = JSON.parse(options.body);
+                return Promise.resolve(new Response(new ReadableStream({start(controller) {
+                    controller.enqueue(new TextEncoder().encode('data: {"type":"status","text":"等待"}\\n\\n'));
+                    options.signal.addEventListener('abort', () => {
+                        mouseTimeline.push('aborted');
+                        controller.error(new DOMException('Stopped', 'AbortError'));
+                    });
+                }}), {headers: {'Content-Type': 'text/event-stream'}}));
+            }
+            if (path === '/api/mouse-control') return original(path, options).then(response => {
+                if (response.ok && !JSON.parse(options.body).enabled) mouseTimeline.push('revoked');
+                return response;
+            });
+            return original(path, options);
+        };
+    }''')
+    page.locator('#prompt').fill('移动鼠标到屏幕中央')
+    page.locator('#send').click()
+    playwright_api.expect(page.locator('#stop')).to_be_visible()
+    playwright_api.expect(page.locator('#mouse-control')).to_be_enabled()
+    page.locator('#mouse-control').click()
+    playwright_api.expect(page.locator('#mouse-control')).to_have_attribute('aria-pressed', 'false')
+    playwright_api.expect(page.locator('#stop')).to_be_hidden()
+    playwright_api.expect(page.locator('.message.assistant .message-body').last).to_contain_text('已停止')
+    assert page.evaluate('window.mouseTimeline') == ['revoked', 'aborted']
+    assert page.evaluate('window.mouseChatBody.mouse_control') is True
+    assert calls == [{'enabled': True}, {'enabled': False}]
+
+
+def test_browser_chat_mouse_end_to_end_single_native_action(page, browser_app):
+    _, app = browser_app
+    plans = []
+
+    async def plan(message, snapshot, provider, transport=None):
+        plans.append((message, provider))
+        return {'action': 'click', 'x': 30, 'y': 40, 'scroll': 0,
+                'width': snapshot['width'], 'height': snapshot['height'], 'message': '仅规划。'}
+
+    app.state.mouse_planner.plan = plan
+    page.evaluate("async () => { await post('/api/automation', {mode: 'auto'}); await refreshStatus(); }")
+    page.locator('#mouse-control').click()
+    playwright_api.expect(page.locator('#mouse-control')).to_have_attribute('aria-pressed', 'true')
+    page.locator('#prompt').fill('请点击“设置”按钮')
+    page.locator('#send').click()
+    playwright_api.expect(page.locator('.message.assistant .message-body').last).to_contain_text('已执行左键点击 (30, 40)')
+    playwright_api.expect(page.locator('#stop')).to_be_hidden()
+    assert app.state.desktop.driver.clicks == [(30, 40, 'left')]
+    assert plans == [('请点击“设置”按钮', 'api')]
+    assert not app.state.model_requests and not app.state.desktop.snapshots
+    assert page.locator('.action-card, #view-desktop').count() == 0
+    page.locator('#mouse-control').click()
+    playwright_api.expect(page.locator('#mouse-control')).to_have_attribute('aria-pressed', 'false')
 
 
 def test_browser_codex_confirmation_and_stop(page):
