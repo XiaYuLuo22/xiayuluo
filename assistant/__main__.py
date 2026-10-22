@@ -1,4 +1,5 @@
 import argparse
+import sys
 import uvicorn
 
 from .config import Settings
@@ -14,8 +15,12 @@ def main(argv=None):
         from .desktop_app import main as desktop_main
         return desktop_main(debug=args.debug)
     settings = Settings.load()
-    print(f"夏鱼洛开发服务已启动，回环地址 http://127.0.0.1:{settings.port}", flush=True)
-    uvicorn.run(create_app(settings), host="127.0.0.1", port=settings.port)
+    if sys.stdout is not None:
+        print(f"夏鱼洛开发服务已启动，回环地址 http://127.0.0.1:{settings.port}", flush=True)
+    options = {"host": "127.0.0.1", "port": settings.port}
+    if getattr(sys, "frozen", False) and sys.stderr is None:
+        options["log_config"] = None  # Windowed builds have no stream for isatty().
+    uvicorn.run(create_app(settings), **options)
     return 0
 
 

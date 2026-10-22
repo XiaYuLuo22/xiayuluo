@@ -12,6 +12,7 @@ from tempfile import TemporaryDirectory
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from assistant import __version__
+from tools.smoke_windows_app import smoke
 
 
 def installer_command(app, output, compiler=None):
@@ -85,6 +86,8 @@ def main(argv=None):
             "--paths", str(ROOT), str(ROOT / "tools/updater_entry.py")], check=True, cwd=ROOT)
     if not (app / "Xiayuluo.exe").is_file() or not (app / "XiayuluoUpdater.exe").is_file():
         raise SystemExit("构建未生成 Xiayuluo.exe，不能标记为成功。")
+    smoke([str(app / "Xiayuluo.exe")], __version__)
+    print("Packaged Windows backend smoke passed; no chat or microphone was started.")
     collect_licenses(app / "licenses")
     shutil.copytree(ROOT / 'tools/licenses', app / 'licenses/voice', dirs_exist_ok=True)
     shutil.copy2(ROOT / "THIRD_PARTY_NOTICES.md", app / "THIRD_PARTY_NOTICES.md")
