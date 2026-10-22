@@ -20,6 +20,7 @@ def smoke(command, expected_version, *, timeout=30):
         environment = {name: value for name, value in os.environ.items()
                        if not name.endswith(("API_KEY", "MODEL_KEY"))}
         environment.update(ASSISTANT_DATA_DIR=str(directory / "memory"), ASSISTANT_PORT=str(port),
+            ASSISTANT_PACKAGED_SMOKE="1",
             MOBILE_ENABLED="false", DESKTOP_ENABLED="false", VOICE_AUTOSTART="false",
             APPROVAL_MODE="manual", CHAT_PROVIDER="codex", CODEX_WORKSPACE="",
             CODEX_EXECUTABLE=str(directory / "disabled-codex"),
@@ -33,6 +34,18 @@ def smoke(command, expected_version, *, timeout=30):
             with httpx.Client(trust_env=False, timeout=.5) as client:
                 while time.monotonic() < deadline:
                     code = process.poll()
+                    report = directory / "packaged-smoke-error.txt"
+                    if report.is_symlink():
+                        raise RuntimeError("Packaged backend diagnostic report is not a regular file.")
+                    if report.is_file():
+                        # Read only a bounded tail from our isolated diagnostic,
+                        # not arbitrary log locations or process environment.
+                        with report.open("rb") as stream:
+                            stream.seek(0, 2)
+                            stream.seek(max(0, stream.tell() - 3000))
+                            diagnostic = stream.read(3000).decode("utf-8", errors="replace")
+                        if diagnostic:
+                            raise RuntimeError("Packaged backend startup failed:\n" + diagnostic)
                     if code is not None:
                         raise RuntimeError(f"Packaged backend exited before readiness (code {code}).")
                     try:

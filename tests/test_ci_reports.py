@@ -19,3 +19,11 @@ def test_ci_command_preserves_exit_code_and_reports_failure_tail(capsys):
     assert '::error title=Windows build command failed::controlled failure%0A' in capsys.readouterr().out
     assert main([sys.executable, '-c', 'print("ok")']) == 0
     assert '::error' not in capsys.readouterr().out
+
+
+def test_ci_annotation_keeps_the_final_error_within_github_limit(capsys):
+    code = 'print("earlier analysis " * 1000); print("ACTUAL FINAL ERROR"); raise SystemExit(1)'
+    assert main([sys.executable, '-c', code]) == 1
+    annotation = capsys.readouterr().out.split('::error title=Windows build command failed::')[-1]
+    assert annotation.endswith('ACTUAL FINAL ERROR%0A\n')
+    assert len(annotation.encode('utf-8')) < 4096

@@ -12,6 +12,9 @@ def main(command):
             tail = (tail + line)[-20000:]
         code = process.wait()
     if code:
+        # Check annotations are truncated by GitHub. Keep the actual final error,
+        # rather than the beginning of a much longer PyInstaller analysis tail.
+        tail = tail.encode('utf-8')[-3000:].decode('utf-8', errors='replace')
         escaped = tail.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
         print(f'::error title=Windows build command failed::{escaped}', flush=True)
     return code
