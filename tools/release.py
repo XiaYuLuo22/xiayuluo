@@ -52,7 +52,10 @@ def manifest(args):
     config = json.loads((ROOT / "assistant/update-config.json").read_text(encoding="utf-8"))
     # Validate binary structure before signing any release metadata.
     with tempfile.TemporaryDirectory(prefix="xiayuluo-release-check-") as work:
-        extract_windows(args.windows, Path(work) / "stage")
+        stage = extract_windows(args.windows, Path(work) / "stage")
+        info = json.loads((stage / "build-info.json").read_text(encoding="utf-8"))
+        if info != {"version": args.version, "platform": "windows-x64"}:
+            raise ValueError("Windows build version does not match the signed release.")
     validate_bundle(args.android)
     pem = args.key_file.read_bytes() if args.key_file else os.environ["XIAYULUO_RELEASE_PRIVATE_KEY"].encode()
     key = serialization.load_pem_private_key(pem, password=None)
@@ -65,7 +68,7 @@ def manifest(args):
         assets[platform] = {"url": f"https://github.com/{config['repository']}/releases/download/v{args.version}/{path.name}",
                             "size": path.stat().st_size, "sha256": digest}
     data = {"schema": 1, "application": "com.xiayuluo.assistant", "version": args.version,
-            "android_code": code, "notes": args.notes_file.read_text(encoding="utf-8"), "assets": assets}
+            "android_code": code, "notes": args.notes_file.read_text(encoding="utf-8").split("\n以下为 ", 1)[0].strip(), "assets": assets}
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
     envelope = json.dumps({"payload": payload, "signature": key.sign(payload.encode()).hex()}, ensure_ascii=False).encode()
     verify_manifest(envelope, config)

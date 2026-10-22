@@ -139,6 +139,7 @@ def fetch_bytes(url, limit, *, destination=None, expected_hash=None, expected_si
     client = client or httpx.Client(timeout=httpx.Timeout(30, read=60), follow_redirects=False)
     response = None
     output = None
+    complete = False
     digest, result, count = hashlib.sha256(), bytearray(), 0
     try:
         response = response_stream(client, url)
@@ -159,10 +160,13 @@ def fetch_bytes(url, limit, *, destination=None, expected_hash=None, expected_si
             raise ValueError("更新下载不完整，请重新下载。")
         if expected_hash and digest.hexdigest() != expected_hash:
             raise ValueError("更新文件校验失败，已拒绝安装。")
+        complete = True
         return bytes(result)
     finally:
         if output:
             output.close()
+            if not complete:
+                Path(destination).unlink(missing_ok=True)  # Only our successfully opened exclusive file.
         if response:
             response.close()
         if owned:
@@ -240,6 +244,7 @@ class Updates:
         if not self.lock.acquire(blocking=False):
             raise ValueError("已有更新正在处理。")
         archive = None
+        archive_owned = False
         stage = None
         try:
             data = self.check()  # Do not accept client-supplied URLs or a stale cached manifest.
@@ -252,11 +257,12 @@ class Updates:
             asset = data["assets"]["windows-x64"]
             fetch_bytes(asset["url"], asset["size"], destination=archive,
                         expected_hash=asset["sha256"], expected_size=asset["size"])
+            archive_owned = True
             stage = install.parent / f".{install.name}.update-{identifier}"
             extract_windows(archive, stage)
             return stage
         finally:
-            if archive and archive.is_file():
+            if archive_owned and archive.is_file():
                 archive.unlink()
             self.lock.release()
 
@@ -265,6 +271,7 @@ class Updates:
         if not self.lock.acquire(blocking=False):
             raise ValueError("已有更新正在处理。")
         archive, stage = None, None
+        archive_owned, stage_owned = False, False
         try:
             install = validate_install(install)
             package = Path(package)
@@ -287,6 +294,7 @@ class Updates:
                 archive = self.cache / f"{identifier}.zip"
                 digest, count = hashlib.sha256(), 0
                 with bundle.open(asset["filename"]) as source, archive.open("xb") as output:
+                    archive_owned = True
                     while chunk := source.read(65536):
                         count += len(chunk)
                         if count > asset["size"]:
@@ -297,15 +305,16 @@ class Updates:
                     raise ValueError("更新文件校验失败。")
             stage = install.parent / f".{install.name}.update-{identifier}"
             extract_windows(archive, stage)
+            stage_owned = True
             info = json.loads((stage / "build-info.json").read_text(encoding="utf-8"))
             if info != {"version": data["version"], "platform": "windows-x64"}:
                 raise ValueError("更新包程序版本不符。")
             return stage
         except Exception:
-            if stage and stage.is_dir():
+            if stage_owned and stage.is_dir():
                 shutil.rmtree(stage)  # Only the newly created staging directory.
             raise
         finally:
-            if archive and archive.is_file():
+            if archive_owned and archive.is_file():
                 archive.unlink()
             self.lock.release()

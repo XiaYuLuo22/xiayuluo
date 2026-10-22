@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+env:
+  PYTHONUTF8: '1'
+
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -28,13 +31,15 @@ jobs:
       - run: python -m pip install -c requirements.lock -e ".[app,desktop,voice,build,test]"
       - run: python tools/release.py check-version ($env:GITHUB_REF_NAME.Substring(1))
         shell: pwsh
-      - run: python -m pytest -q tests/test_updates.py tests/test_desktop_app.py tests/test_mobile.py tests/test_codex_chat.py tests/test_voice.py tests/test_voice_consent.py tests/test_automation.py
+      - run: python -m pytest -q tests/test_updates.py tests/test_offline_updates.py tests/test_update_ownership.py tests/test_desktop_app.py tests/test_mobile.py tests/test_codex_chat.py tests/test_voice.py tests/test_voice_consent.py tests/test_automation.py
       - run: python tools/prepare_voice_model.py
-      - run: python tools/build_desktop.py
+      - run: python tools/run_ci_command.py python tools/build_desktop.py --installer
       - uses: actions/upload-artifact@v4
         with:
           name: windows-update
-          path: dist/desktop/Xiayuluo-Windows.zip
+          path: |
+            dist/desktop/Xiayuluo-Windows.zip
+            dist/desktop/Xiayuluo-Setup.exe
           if-no-files-found: error
 
   android:

@@ -16,7 +16,7 @@ Windows 优先的可扩展桌面 App：独立窗口、日常文字对话、逐�
 
 ## 日常聊天 App
 
-0.1.9 按用户选择保持全部私有，暂不启用在线直更或自动联网检查。Windows 构建增加 `Xiayuluo-Setup.exe` 图形安装器，建立桌面和开始菜单图标，直接打开 App，无需 CMD/Python；E 盘存在时默认安装到 E:\Xiayuluo，可改位置。设置页增加「选择更新包并重启」，使用私下分发的 `.xyupdate` 签名包，不覆盖配置和记忆。首次仍要安装一次发行版，旧源码不能凭空变成 exe；安装包须以 Actions 成功产物为准。见 [DESKTOP.md](DESKTOP.md) 与 [UPDATES.md](UPDATES.md)。
+0.1.9 Windows 构建增加 `Xiayuluo-Setup.exe` 图形安装器，建立桌面和开始菜单图标，直接打开 App，无需 CMD/Python；E 盘存在时默认安装到 E:\Xiayuluo，可改位置。原生发行版启动后自动检查正式签名版本，发现新版可一键下载、校验、重启，也支持「选择更新包并重启」导入私人 `.xyupdate`，保留外部配置和记忆。用户计划自行公开仓库，目前仍私有且未发布签名更新源；不能把源码公开当成更新已上线。首次要安装一次发行版，旧源码不能凭空变成 exe。见 [DESKTOP.md](DESKTOP.md) 与 [UPDATES.md](UPDATES.md)。
 
 0.1.8 在电脑界面启动时自动识别官方 Codex CLI 的现有 ChatGPT 登录，设置可重新检测，无需每次配置或预先打开 ChatGPT/Codex 桌面窗口。首次仍需安装 CLI 并 `codex login`；不读取 GUI 登录、不发测试问题、不改变显式 API 来源，网络与会员额度以实际回复为准。本次提供电脑源码更新，已配对的 0.1.7 安卓 App 协议兼容无需重装，未构建 0.1.8 APK 或 Windows EXE。详见 [CODEX_CHAT.md](CODEX_CHAT.md)。
 

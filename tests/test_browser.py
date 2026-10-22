@@ -476,7 +476,7 @@ def test_private_source_mode_never_auto_checks_or_imports_updates(page):
     page.reload()
     page.locator('[data-view="settings"]').click()
     playwright_api.expect(page.locator('#import-update')).to_be_disabled()
-    playwright_api.expect(page.locator('#update-status')).to_contain_text('暂不启用在线直更')
+    playwright_api.expect(page.locator('#update-status')).to_contain_text('签名版本')
     assert not any(url.endswith('/api/updates') or url.endswith('/api/updates/import') for url in requests)
 
 
@@ -496,14 +496,51 @@ def test_private_native_import_button_reports_real_outcome_without_client_paths(
         else:
             route.fulfill(json={'restarting': outcome == 'restart', 'cancelled': outcome == 'cancel'})
     page.route('**/api/status*', native_status)
+    page.route('**/api/updates', lambda route: route.fulfill(json={'available': False, 'current': '0.1.9',
+        'version': '0.1.9', 'notes': '', 'install_supported': True}))
     page.route('**/api/updates/import', imported)
-    page.reload()
+    with page.expect_response('**/api/updates'):
+        page.reload()
     page.locator('[data-view="settings"]').click()
     playwright_api.expect(page.locator('#import-update')).to_be_enabled()
+    playwright_api.expect(page.locator('#check-update')).to_be_enabled()
     page.locator('#import-update').click()
     expected = {'cancel': '已取消', 'error': '签名无效', 'restart': '正在重启更新'}[outcome]
     playwright_api.expect(page.locator('#update-status')).to_contain_text(expected)
     assert requests == [{'confirm': True}]
+
+
+@pytest.mark.parametrize('outcome', ['new', 'current', 'unpublished'])
+def test_native_startup_checks_updates_without_automatically_installing(page, outcome):
+    requests = []
+    def native_status(route):
+        response = route.fetch()
+        status = response.json()
+        status['runtime']['update_supported'] = True
+        route.fulfill(response=response, json=status)
+    def check(route):
+        requests.append(route.request.method)
+        if outcome == 'unpublished':
+            route.fulfill(status=409, json={'detail': '更新源尚未发布'})
+        else:
+            route.fulfill(json={'available': outcome == 'new', 'version': '0.2.0' if outcome == 'new' else '0.1.9',
+                                'current': '0.1.9', 'notes': '修复测试', 'install_supported': True})
+    page.route('**/api/status*', native_status)
+    page.route('**/api/updates', check)
+    with page.expect_response('**/api/updates'):
+        page.reload()
+    badge = page.locator('#update-available')
+    if outcome == 'new':
+        playwright_api.expect(badge).to_be_visible()
+        badge.click()
+        playwright_api.expect(page.locator('#install-update')).to_be_visible()
+        playwright_api.expect(page.locator('#update-status')).to_contain_text('发现 0.2.0')
+    else:
+        playwright_api.expect(badge).to_be_hidden()
+        page.locator('[data-view="settings"]').click()
+        expected = '暂无更高版本' if outcome == 'current' else '更新源尚未发布'
+        playwright_api.expect(page.locator('#update-status')).to_contain_text(expected)
+    assert requests == ['GET']
 
 
 def test_voice_opt_in_start_stop_controls(page):

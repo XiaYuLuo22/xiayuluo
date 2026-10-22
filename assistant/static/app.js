@@ -109,8 +109,11 @@ async function loadUpdateDownloads() {
 $('#download-update').addEventListener('click', () => {
   $('#update-status').textContent = '已请求在系统浏览器打开 GitHub 下载页；私有仓库需登录。请选择成功构建下载，打开页面不代表更新已安装。';
 });
-$('#check-update').addEventListener('click', async () => {
-  if (updateBusy) return;
+let lastUpdateCheck = 0;
+async function checkForUpdates(automatic = false) {
+  if (updateBusy || !state.token) return;
+  if (automatic && (!state.status?.runtime.update_supported || document.hidden || state.busy)) return;
+  lastUpdateCheck = Date.now();
   updateBusy = true; $('#check-update').disabled = true; $('#install-update').hidden = true;
   $('#update-status').textContent = '正在检查签名更新清单…'; $('#update-notes').hidden = true;
   try {
@@ -120,8 +123,19 @@ $('#check-update').addEventListener('click', async () => {
       : `当前 ${result.current}，暂无更高版本。`;
     $('#update-notes').textContent = result.notes; $('#update-notes').hidden = !result.notes;
     $('#install-update').hidden = !result.available || !result.install_supported;
-  } catch (error) { $('#update-status').textContent = error.message; }
+    $('#update-available').hidden = !result.available;
+    $('#update-available').title = result.available ? `发现 ${result.version}，打开更新设置` : '';
+    if (result.available && automatic) toast(`发现夏鱼洛 ${result.version}，可在设置中更新。`);
+  } catch (error) {
+    $('#update-status').textContent = error.message;
+    $('#update-available').hidden = true;
+  }
   finally { updateBusy = false; $('#check-update').disabled = false; }
+}
+$('#check-update').addEventListener('click', () => void checkForUpdates());
+$('#update-available').addEventListener('click', guarded(() => openView('settings')));
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && Date.now() - lastUpdateCheck >= 3600000) void checkForUpdates(true);
 });
 $('#install-update').addEventListener('click', async () => {
   if (updateBusy || state.busy) return toast('请先完成或停止当前任务。');
@@ -692,4 +706,6 @@ guarded(async () => {
   setInterval(() => void refreshVoice(), 3000);
   await refreshStatus(); const sessions = await refreshSessions(); if (sessions.length) await loadSession(sessions[0].id);
   if (usingCodex()) void connectCodex();
+  void checkForUpdates(true);
+  setInterval(() => void checkForUpdates(true), 3600000);
 })();
