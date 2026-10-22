@@ -1,5 +1,21 @@
 # 夏鱼洛 App 内更新
 
+## 0.1.9 当前选择：全私有、本地签名更新
+
+用户已明确选择全部保持私有，暂不启用在线直更。App 不自动检查/下载，不创建公开仓库或 Release，也不内置 GitHub token。以下旧在线清单流程仍是预留能力，不表示更新服务已经上线。
+
+Windows 首次安装 `Xiayuluo-Setup.exe`，以后直接打开桌面/开始菜单「夏鱼洛」，不通过 CMD。后续在私人渠道取得 `.xyupdate` 后，在 App「设置 → 版本与更新 → 选择更新包并重启」用原生文件选择器选文件。取消即返回原版；签名、应用/平台、版本递增、大小、SHA-256、内部程序 build-info 全部通过后，才同盘暂存并调用独立 helper 重启替换。配置、四级记忆在安装目录外保留，已安装的卸载器文件保留，失败回滚。不能把源码 ZIP、普通 Windows ZIP 或 APK 当成签名更新包。
+
+本地导入接口只开放给本机已授权会话，HTTP 参数不接受任意文件路径；手机没有此能力。必须先完成/停止当前聊天和 Codex，源码版不能覆盖 checkout。没有新版本时不得把当前包反复重装。此版本没有数据库迁移，程序回滚不是记忆库备份。
+
+开发者私下生成更新包（不上传、不发布、不更换私钥）：
+
+```powershell
+python tools/release.py windows-package --version 0.1.9 --windows Xiayuluo-Windows.zip --notes-file RELEASE_NOTES.md --key-file .release-signing/release-private.pem --output Xiayuluo-0.1.9.xyupdate
+```
+
+输入必须是对应版本 Windows 构建，已有输出拒绝覆盖；更新包只含签名清单和运行程序 ZIP，不含私钥、用户配置或数据库。签名不是 Windows Authenticode，不消除系统 SmartScreen。正式 Windows 安装器和覆盖升级必须分别验证，不以 Linux 测试替代。
+
 ## 使用方式
 
 支持更新的版本从 **0.1.1** 开始，始终可见的「下载更新」按钮从 **0.1.3** 开始。旧包必须先手动覆盖安装一次新版；云端修改不能让已安装旧包凭空获得能力。

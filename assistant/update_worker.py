@@ -4,6 +4,8 @@ from ctypes import wintypes
 import json
 import os
 from pathlib import Path
+import re
+import shutil
 import subprocess
 import sys
 import time
@@ -29,6 +31,14 @@ def swap_install(install, stage, launch=subprocess.Popen):
             or not install.is_dir() or not (stage / "Xiayuluo.exe").is_file()
             or any((install / name).exists() for name in (".env", ".assistant", ".venv", ".git"))):
         raise ValueError("更新目录无效或含用户数据。")
+    # Inno Setup's per-user uninstaller must remain at its registered path.
+    # Keep only its exact metadata files, never arbitrary old application files.
+    for source in install.iterdir():
+        if re.fullmatch(r"unins[0-9]{3}\.(exe|dat|msg)", source.name, re.IGNORECASE):
+            target = stage / source.name
+            if source.is_symlink() or not source.is_file() or target.exists():
+                raise ValueError("卸载器元数据冲突，保留原版。")
+            shutil.copy2(source, target)
     backup = install.with_name(f".{install.name}.backup-{uuid.uuid4().hex}")
     rename_with_retry(install, backup)
     try:

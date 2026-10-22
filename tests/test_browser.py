@@ -470,6 +470,42 @@ def test_download_update_button_works_without_public_manifest(page):
     popup.close()
 
 
+def test_private_source_mode_never_auto_checks_or_imports_updates(page):
+    requests = []
+    page.on('request', lambda request: requests.append(request.url))
+    page.reload()
+    page.locator('[data-view="settings"]').click()
+    playwright_api.expect(page.locator('#import-update')).to_be_disabled()
+    playwright_api.expect(page.locator('#update-status')).to_contain_text('暂不启用在线直更')
+    assert not any(url.endswith('/api/updates') or url.endswith('/api/updates/import') for url in requests)
+
+
+@pytest.mark.parametrize('outcome', ['cancel', 'error', 'restart'])
+def test_private_native_import_button_reports_real_outcome_without_client_paths(page, outcome):
+    requests = []
+    def native_status(route):
+        response = route.fetch()
+        status = response.json()
+        status['runtime']['update_supported'] = True
+        status['automation']['mode'] = 'auto'
+        route.fulfill(response=response, json=status)
+    def imported(route):
+        requests.append(route.request.post_data_json)
+        if outcome == 'error':
+            route.fulfill(status=409, json={'detail': '签名无效，原版保留。'})
+        else:
+            route.fulfill(json={'restarting': outcome == 'restart', 'cancelled': outcome == 'cancel'})
+    page.route('**/api/status*', native_status)
+    page.route('**/api/updates/import', imported)
+    page.reload()
+    page.locator('[data-view="settings"]').click()
+    playwright_api.expect(page.locator('#import-update')).to_be_enabled()
+    page.locator('#import-update').click()
+    expected = {'cancel': '已取消', 'error': '签名无效', 'restart': '正在重启更新'}[outcome]
+    playwright_api.expect(page.locator('#update-status')).to_contain_text(expected)
+    assert requests == [{'confirm': True}]
+
+
 def test_voice_opt_in_start_stop_controls(page):
     requests = []
     running = [False]

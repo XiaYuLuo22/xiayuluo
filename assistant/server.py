@@ -113,6 +113,7 @@ def create_app(settings=None, *, memory=None, transport=None):
     app.state.config_file = ""
     app.state.devices = devices
     app.state.install_update = None
+    app.state.install_local_update = None
     app.state.updating = False
     app.state.voice = None
     voice_consents = VoiceConsents(memory)
@@ -162,7 +163,8 @@ def create_app(settings=None, *, memory=None, transport=None):
         public_endpoint = urlunsplit((endpoint.scheme, endpoint.netloc.rsplit("@", 1)[-1], endpoint.path, "", ""))
         return {"runtime": {"name": "夏鱼洛", "version": __version__, "platform": platform.system(),
                             "python": platform.python_version(), "uptime_seconds": int(time.monotonic() - started_at),
-                            "presentation": app.state.presentation, "config_file": app.state.config_file},
+                            "presentation": app.state.presentation, "config_file": app.state.config_file,
+                            "update_supported": app.state.install_update is not None},
                 "model": {"configured": bool(settings.api_key) if provider == "api" else dialogue_ready,
                           "name": settings.model if provider == "api" else "Codex · ChatGPT 登录",
                           "endpoint": public_endpoint if provider == "api" else "本机官方 CLI",
@@ -307,6 +309,22 @@ def create_app(settings=None, *, memory=None, transport=None):
         except Exception as error:
             app.state.updating = False
             raise HTTPException(409, "更新未完成，当前安装未被覆盖，请稍后重试。") from error
+
+    @app.post("/api/updates/import", dependencies=auth)
+    async def import_update(body: UpdateRequest):
+        if not body.confirm or app.state.install_local_update is None:
+            raise HTTPException(409, "请在 Windows 发行版中选择签名更新包，源码版不能覆盖更新。")
+        if active_sessions or app.state.updating:
+            raise HTTPException(409, "请先完成或停止所有聊天、Codex 和更新任务。")
+        app.state.updating = True
+        try:
+            restarting = await asyncio.to_thread(app.state.install_local_update, updater)
+            if not restarting:
+                app.state.updating = False
+            return {"restarting": bool(restarting), "cancelled": not restarting}
+        except Exception as error:
+            app.state.updating = False
+            raise HTTPException(409, "离线更新未完成：请检查签名、版本和安装目录；原版与用户数据保留。") from error
 
     @app.get("/api/sessions", dependencies=auth)
     async def sessions():

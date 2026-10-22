@@ -21,6 +21,40 @@ MAX_DOWNLOAD = 512 * 1024 * 1024
 CONFIG = Path(__file__).with_name("update-config.json")
 
 
+def verify_windows_package(raw, config):
+    """Separate, offline-only signed format; never supplies a URL to fetch."""
+    if len(raw) > MAX_MANIFEST:
+        raise ValueError("更新清单过大。")
+    try:
+        envelope = json.loads(raw)
+        payload, signature = envelope["payload"], bytes.fromhex(envelope["signature"])
+        if not isinstance(payload, str) or len(signature) != 64:
+            raise ValueError()
+        Ed25519PublicKey.from_public_bytes(bytes.fromhex(config["public_key"])).verify(signature, payload.encode("utf-8"))
+        data = json.loads(payload)
+        version(data["version"])
+        if data["schema"] != 2 or data["application"] != "com.xiayuluo.assistant" or data["platform"] != "windows-x64":
+            raise ValueError()
+        if not isinstance(data["notes"], str) or len(data["notes"]) > 4000:
+            raise ValueError()
+        asset = data["asset"]
+        if (asset["filename"] != "Xiayuluo-Windows.zip" or type(asset["size"]) is not int
+                or not 1 <= asset["size"] <= MAX_DOWNLOAD or not re.fullmatch(r"[0-9a-f]{64}", asset["sha256"])):
+            raise ValueError()
+        return data
+    except (KeyError, TypeError, ValueError, InvalidSignature, json.JSONDecodeError) as error:
+        raise ValueError("离线更新包签名或内容无效，已拒绝更新。") from error
+
+
+def validate_install(install):
+    install = Path(install).resolve()
+    if install.parent == install or not (install / "Xiayuluo.exe").is_file():
+        raise ValueError("无法确定桌面 App 安装目录。")
+    if any((install / name).exists() for name in (".env", ".assistant", ".venv", ".git")):
+        raise ValueError("安装目录有用户数据，请先迁移至配置目录后再更新。")
+    return install
+
+
 def download_pages(repository):
     if (not isinstance(repository, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}", repository)
             or repository.rsplit("/", 1)[-1] in {".", ".."}):
@@ -211,12 +245,7 @@ class Updates:
             data = self.check()  # Do not accept client-supplied URLs or a stale cached manifest.
             if not data["available"]:
                 raise ValueError("没有更高版本，不允许降级或重装。")
-            install = Path(install).resolve()
-            if install.parent == install or not (install / "Xiayuluo.exe").is_file():
-                raise ValueError("无法确定桌面 App 安装目录。")
-            # Frozen apps keep user data outside installation. Refuse legacy/portable data.
-            if any((install / name).exists() for name in (".env", ".assistant", ".venv", ".git")):
-                raise ValueError("安装目录有用户数据，请先迁移至配置目录后再更新。")
+            install = validate_install(install)
             self.cache.mkdir(parents=True, exist_ok=True, mode=0o700)
             identifier = uuid.uuid4().hex
             archive = self.cache / f"{identifier}.zip"
@@ -226,6 +255,56 @@ class Updates:
             stage = install.parent / f".{install.name}.update-{identifier}"
             extract_windows(archive, stage)
             return stage
+        finally:
+            if archive and archive.is_file():
+                archive.unlink()
+            self.lock.release()
+
+    def prepare_local(self, package, install):
+        """Import a user-selected signed file, with no networking or source checkout edits."""
+        if not self.lock.acquire(blocking=False):
+            raise ValueError("已有更新正在处理。")
+        archive, stage = None, None
+        try:
+            install = validate_install(install)
+            package = Path(package)
+            if not package.is_file() or package.suffix.lower() != ".xyupdate" or package.stat().st_size > MAX_DOWNLOAD + MAX_MANIFEST + 65536:
+                raise ValueError("请选择有效的 .xyupdate 签名更新包。")
+            with zipfile.ZipFile(package) as bundle:
+                entries = bundle.infolist()
+                if (len(entries) != 2 or {item.orig_filename for item in entries} != {"update.json", "Xiayuluo-Windows.zip"}
+                        or any(stat.S_ISLNK(item.external_attr >> 16) for item in entries)
+                        or bundle.getinfo("update.json").file_size > MAX_MANIFEST):
+                    raise ValueError("离线更新包结构无效。")
+                data = verify_windows_package(bundle.read("update.json"), self.config)
+                if version(data["version"]) <= version(__version__):
+                    raise ValueError("没有更高版本，不允许降级或重装。")
+                asset = data["asset"]
+                if bundle.getinfo(asset["filename"]).file_size != asset["size"]:
+                    raise ValueError("更新文件大小不符。")
+                self.cache.mkdir(parents=True, exist_ok=True, mode=0o700)
+                identifier = uuid.uuid4().hex
+                archive = self.cache / f"{identifier}.zip"
+                digest, count = hashlib.sha256(), 0
+                with bundle.open(asset["filename"]) as source, archive.open("xb") as output:
+                    while chunk := source.read(65536):
+                        count += len(chunk)
+                        if count > asset["size"]:
+                            raise ValueError("更新文件大小超限。")
+                        digest.update(chunk)
+                        output.write(chunk)
+                if count != asset["size"] or digest.hexdigest() != asset["sha256"]:
+                    raise ValueError("更新文件校验失败。")
+            stage = install.parent / f".{install.name}.update-{identifier}"
+            extract_windows(archive, stage)
+            info = json.loads((stage / "build-info.json").read_text(encoding="utf-8"))
+            if info != {"version": data["version"], "platform": "windows-x64"}:
+                raise ValueError("更新包程序版本不符。")
+            return stage
+        except Exception:
+            if stage and stage.is_dir():
+                shutil.rmtree(stage)  # Only the newly created staging directory.
+            raise
         finally:
             if archive and archive.is_file():
                 archive.unlink()

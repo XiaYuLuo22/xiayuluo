@@ -132,6 +132,17 @@ $('#install-update').addEventListener('click', async () => {
   catch (error) { $('#update-status').textContent = error.message; }
   finally { updateBusy = false; $('#install-update').disabled = false; $('#check-update').disabled = false; }
 });
+$('#import-update').addEventListener('click', async () => {
+  if (updateBusy || state.busy) return toast('请先完成或停止当前任务。');
+  if (!approveLocally('选择下载好的签名更新包，校验后退出并重启夏鱼洛？配置和四级记忆保留。')) return;
+  updateBusy = true; $('#import-update').disabled = true; $('#check-update').disabled = true;
+  $('#update-status').textContent = '请选择 .xyupdate 签名更新包；校验期间请勿关闭 App…';
+  try {
+    const result = await post('/api/updates/import', { confirm: true });
+    $('#update-status').textContent = result.cancelled ? '已取消，当前版本未改变。' : '签名和文件校验通过，正在重启更新…';
+  } catch (error) { $('#update-status').textContent = error.message; }
+  finally { updateBusy = false; $('#import-update').disabled = !state.status?.runtime.update_supported; $('#check-update').disabled = false; }
+});
 
 function setMode(mode) {
   state.mode = mode;
@@ -229,6 +240,7 @@ function message(role, content = '') {
 async function refreshStatus() {
   state.status = await json(`/api/status${state.session ? `?session_id=${encodeURIComponent(state.session)}` : ''}`);
   const status = state.status;
+  $('#import-update').disabled = !status.runtime.update_supported || updateBusy || state.busy;
   const source = state.provider === 'auto' ? status.model.provider : state.provider;
   const ready = source === 'codex' ? status.model.codex_chat_available : status.model.api_configured;
   const connection = status.model.codex_connection;

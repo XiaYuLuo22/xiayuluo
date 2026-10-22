@@ -170,8 +170,7 @@ def run_window(settings, config_file, *, webview_module=None, debug=False):
             install_dir = Path(sys.executable).resolve().parent
             # Never swap an installation containing configured memory/config data.
             if update_location_safe(install_dir, config_file, settings):
-                def install_update(updater):
-                    stage = updater.prepare(install_dir)
+                def restart_with_stage(stage):
                     # The old binary directory must be unlockable: run the helper outside it.
                     helper_dir = Path(mkdtemp(prefix="xiayuluo-update-"))
                     try:
@@ -190,7 +189,19 @@ def run_window(settings, config_file, *, webview_module=None, debug=False):
                         window.confirm_close = False  # Already explicitly confirmed by the update dialog.
                         window.destroy()
                     Timer(.5, restart).start()
+
+                def install_update(updater):
+                    restart_with_stage(updater.prepare(install_dir))
+
+                def import_update(updater):
+                    selected = window.create_file_dialog(webview_module.FileDialog.OPEN, allow_multiple=False,
+                        file_types=("夏鱼洛签名更新包 (*.xyupdate)",))
+                    if not selected:
+                        return False
+                    restart_with_stage(updater.prepare_local(selected[0], install_dir))
+                    return True
                 service.app.state.install_update = install_update
+                service.app.state.install_local_update = import_update
         # Closing the native window cancels active streams and owned Codex subprocesses.
         window.events.closing += service.stop
         window.events.shown += service.on_window_shown

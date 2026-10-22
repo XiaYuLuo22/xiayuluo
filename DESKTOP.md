@@ -6,6 +6,16 @@
 
 ## 从源码直接启动
 
+## 0.1.9 日常使用：安装器与桌面图标
+
+源码保持私有。登录有权限的 GitHub 账号，打开 Windows Actions 的**成功运行**，下载 `Xiayuluo-Windows` artifact，完整解压后双击 `Xiayuluo-Setup.exe`，按图形向导安装。存在 E 盘时默认 `E:\Xiayuluo`，否则使用用户目录 `Programs\Xiayuluo`，均可在向导中选择其他可写位置；无需管理员权限、Python 或 CMD。以后双击桌面「夏鱼洛」或开始菜单图标即可，直接目标是 `Xiayuluo.exe`。未做 Windows 代码签名，系统可能提示 SmartScreen；WebView2 与 Codex 首次登录仍需系统/官方流程。
+
+暂不启用在线直更或自动检查，不公开任何仓库。后续从私人渠道下载 `.xyupdate`，进入 App「设置 → 版本与更新 → 选择更新包并重启」，选择文件，验证签名/版本/哈希后自动重启替换，保留外部配置、记忆与卸载器。取消、错误或旧版本不安装。普通安装器也可在关闭旧版后用于覆盖安装，卸载不主动删除 `%LOCALAPPDATA%\Xiayuluo` 的用户数据。
+
+首次从源码迁移：先关闭源码版，备份原 `.env` 和 `.assistant`；在新 App 菜单「打开配置目录」定位 `%LOCALAPPDATA%\Xiayuluo`，关闭 App 后用文件管理器迁移配置和记忆（不要覆盖已有数据，先备份）。新安装器不会擅自搜索或读取旧源码目录，也不将旧数据自动打包。Android 0.1.7 可继续配对，无需为电脑安装方式重装。
+
+### 开发者源码入口（非日常发行版）
+
 0.1.4 语音测试功能需要另外安装 `.[app,desktop,voice]`、准备官方中文离线模型并具备系统中文 SAPI 声音；普通 `start.cmd` 的文字聊天不强制下载模型。模型已在云端获取并校验，未完成 Windows 麦克风验收；Windows 安装包仍须在 Windows 构建，不能把源码通过当成 EXE 已验收。设置页会明确显示不可用原因，见 [VOICE.md](VOICE.md)。
 
 日常问答可以使用官方 Codex CLI 的 ChatGPT 登录，不需要模型 API 密钥或项目目录；需要支持安全开关的新版 CLI，默认发送即调用，执行方式可在设置修改。0.1.8 在界面启动/选择 Codex 时自动识别现有 CLI 登录，设置可重新检测；无需先打开 ChatGPT/Codex 窗口，仅装桌面 App 不代表 CLI 已安装或登录。检测只验证本地登录方式，网络/权限/额度以实际回复为准，完整步骤见 [CODEX_CHAT.md](CODEX_CHAT.md)。编程模式仍需项目目录。

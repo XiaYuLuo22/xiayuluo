@@ -8,13 +8,14 @@ from pathlib import Path
 import sys
 import tempfile
 import tomllib
+import zipfile
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from assistant.updates import extract_windows, verify_manifest, version
+from assistant.updates import extract_windows, verify_manifest, verify_windows_package, version
 from tools.build_android import validate_bundle
 
 
@@ -87,6 +88,42 @@ def restore_android_key(directory):
         path.chmod(0o600)
 
 
+def windows_package(args):
+    """Sign a private offline Windows update; never uploads or changes visibility."""
+    verify_versions(args.version)
+    config = json.loads((ROOT / "assistant/update-config.json").read_text(encoding="utf-8"))
+    with tempfile.TemporaryDirectory(prefix="xiayuluo-package-check-") as work:
+        stage = extract_windows(args.windows, Path(work) / "stage")
+        info = json.loads((stage / "build-info.json").read_text(encoding="utf-8"))
+        if info != {"version": args.version, "platform": "windows-x64"}:
+            raise ValueError("Windows build version does not match the signed update.")
+    with args.windows.open("rb") as source:
+        digest = hashlib.file_digest(source, "sha256").hexdigest()
+    notes = args.notes_file.read_text(encoding="utf-8").split("\n以下为 ", 1)[0].strip()
+    data = {"schema": 2, "application": "com.xiayuluo.assistant", "platform": "windows-x64",
+            "version": args.version, "notes": notes,
+            "asset": {"filename": "Xiayuluo-Windows.zip", "size": args.windows.stat().st_size, "sha256": digest}}
+    pem = args.key_file.read_bytes() if args.key_file else os.environ["XIAYULUO_RELEASE_PRIVATE_KEY"].encode()
+    key = serialization.load_pem_private_key(pem, password=None)
+    if not isinstance(key, Ed25519PrivateKey) or key.public_key().public_bytes_raw().hex() != config["public_key"]:
+        raise ValueError("Release key does not match the apps' pinned public key.")
+    payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    envelope = json.dumps({"payload": payload, "signature": key.sign(payload.encode()).hex()}, ensure_ascii=False).encode()
+    verify_windows_package(envelope, config)
+    created = False
+    try:
+        with args.output.open("xb") as output:
+            created = True
+            with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as bundle:
+                bundle.writestr("update.json", envelope)
+                bundle.write(args.windows, "Xiayuluo-Windows.zip")
+    except Exception:
+        if created:
+            args.output.unlink(missing_ok=True)
+        raise
+    print(f"Private signed Windows update: {args.output}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -101,10 +138,18 @@ def main():
     signing.add_argument("--notes-file", type=Path, required=True)
     signing.add_argument("--key-file", type=Path)
     signing.add_argument("--output", type=Path, required=True)
+    offline = commands.add_parser("windows-package")
+    offline.add_argument("--version", required=True)
+    offline.add_argument("--windows", type=Path, required=True)
+    offline.add_argument("--notes-file", type=Path, required=True)
+    offline.add_argument("--key-file", type=Path)
+    offline.add_argument("--output", type=Path, required=True)
     restore = commands.add_parser("restore-android-key")
     restore.add_argument("directory", type=Path)
     args = parser.parse_args()
-    if args.command == "keygen":
+    if args.command == "windows-package":
+        windows_package(args)
+    elif args.command == "keygen":
         keygen(args.directory)
     elif args.command == "check-version":
         verify_versions(args.version)
