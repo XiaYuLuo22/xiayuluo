@@ -49,7 +49,7 @@ def model_directory():
 
 
 class DesktopVoice:
-    def __init__(self, url, token, *, platform=None, model=None, autostart=True):
+    def __init__(self, url, token, *, platform=None, model=None, autostart=True, speech=None):
         self.url, self.token = url, token
         self.platform = platform or sys.platform
         self.model = Path(model) if model else model_directory()
@@ -62,11 +62,60 @@ class DesktopVoice:
         self.microphone = None
         self.autostart = autostart
         self.autostart_attempted = False
+        self.speech = speech
+        self.speech_active = Event()
+        self.speech_generation = 0
+        if speech is not None:
+            speech.set_activity_callback(self._speech_activity)
+
+    def _speech_activity(self, active):
+        if active:
+            self.speech_generation += 1
+            self.speech_active.set()
+        else:
+            self.speech_active.clear()
+
+    @staticmethod
+    def _clear_audio(samples):
+        while True:
+            try:
+                samples.get_nowait()
+            except Empty:
+                return
+
+    def _pause_for_playback(self, stream, samples, recognizer):
+        """Only the ASR worker stops/restarts its native stream, never the UI/TTS thread."""
+        if not self.speech_active.is_set():
+            return False
+        stream.stop()
+        self._clear_audio(samples)
+        recognizer.Reset()
+        self.phase, self.message = "speaking", "正在朗读回复，暂停麦克风识别以避免自唤醒。"
+        while self.speech_active.is_set() and not self.stop_event.wait(.03):
+            pass
+        self._clear_audio(samples)
+        recognizer.Reset()
+        if not self.stop_event.is_set():
+            stream.start()
+            self.phase, self.message = "listening", "正在本地监听“夏鱼洛”。"
+        return True
+
+    def _speak(self, text):
+        if self.speech is None or self.stop_event.is_set():
+            return
+        try:
+            ticket = self.speech.say(text, source='voice')
+        except ValueError:
+            return  # A muted/unavailable speaker never silently opens another TTS path.
+        while not ticket.done.wait(.03):
+            if self.stop_event.is_set():
+                self.speech.stop(source='voice')
+                return
 
     def available(self):
         if self.platform != "win32":
             return False, "仅 Windows 桌面 App 支持本机语音；网页/云端不监听麦克风。"
-        if not all(importlib.util.find_spec(name) for name in ("vosk", "sounddevice", "pyttsx3")):
+        if not all(importlib.util.find_spec(name) for name in ("vosk", "sounddevice")):
             return False, '缺少语音依赖，请安装 .[app,desktop,voice] 或使用含语音的新版安装包。'
         if not (self.model / "am/final.mdl").is_file():
             return False, "缺少官方离线中文模型，请先运行 tools/prepare_voice_model.py。"
@@ -109,6 +158,8 @@ class DesktopVoice:
         with self.lock:
             self.autostart_attempted = True  # Stop wins over a delayed/repeated window-shown event.
             self.stop_event.set()
+        if self.speech is not None:
+            self.speech.stop(source='voice')
         if self.microphone:
             try:
                 self.microphone.abort()
@@ -160,33 +211,23 @@ class DesktopVoice:
             # Approval and tool execution remain in the desktop interface.
             self.phase, self.message = "approval", "请到电脑待确认任务批准，本轮不会自动执行。"
             return "本轮需要你在电脑待确认任务中批准。批准后的回答请查看聊天记录。"
-        return "".join(text)[:1800] or "本轮没有可朗读的回复。"
+        return "".join(text) or "本轮没有可朗读的回复。"
 
     def _run(self):
-        stream = engine = model = recognizer = com = None
+        stream = model = recognizer = None
         try:
             import sounddevice as sd
             import vosk
-            import pyttsx3
-            import pythoncom as com
-            com.CoInitialize()
             vosk.SetLogLevel(-1)
             model = vosk.Model(str(self.model))
             recognizer = vosk.KaldiRecognizer(model, 16000)
             if self.stop_event.is_set():
                 return
-            engine = pyttsx3.init()
-            chinese = None
-            for voice in engine.getProperty("voices"):
-                if any(name in (str(voice.languages) + str(voice.name)).lower() for name in ("zh", "chinese", "中文")):
-                    chinese = voice.id
-                    break
-            if not chinese:
-                raise ValueError("缺少 Windows 系统本地中文朗读声音。")
-            engine.setProperty("voice", chinese)
             samples = Queue(maxsize=30)
             overflow = Event()
             def receive(data, frames, timing, status):
+                if self.speech_active.is_set() or self.stop_event.is_set():
+                    return  # Discard playback/echo buffers before any ASR processing.
                 if status:
                     overflow.set()
                 try:
@@ -215,13 +256,22 @@ class DesktopVoice:
                 Thread(target=heartbeat, name="xiayuluo-voice-lease", daemon=True).start()
                 with sd.RawInputStream(samplerate=16000, blocksize=4000, dtype="int16", channels=1, callback=receive) as stream:
                     self.microphone = stream
+                    observed_speech_generation = self.speech_generation
                     self.phase, self.message = "listening", "正在本地监听“夏鱼洛”；最小化后仍运行。"
                     while not self.stop_event.is_set():
+                        if observed_speech_generation != self.speech_generation:
+                            self._clear_audio(samples)
+                            recognizer.Reset()
+                            observed_speech_generation = self.speech_generation
+                        if self._pause_for_playback(stream, samples, recognizer):
+                            continue
                         if overflow.is_set():
                             raise ValueError("麦克风输入溢出或异常，监听已停止，请检查设备后重新开启。")
                         try:
                             audio = samples.get(timeout=.25)
                         except Empty:
+                            continue
+                        if self.speech_active.is_set():
                             continue
                         if not recognizer.AcceptWaveform(audio):
                             continue
@@ -242,17 +292,8 @@ class DesktopVoice:
                         if self.stop_event.is_set():
                             break
                         self.phase, self.message = "speaking", "正在朗读，暂停识别以避免自唤醒。"
-                        engine.say(reply.replace('<', '＜').replace('>', '＞'))
-                        engine.startLoop(False)
-                        try:
-                            while engine.isBusy() and not self.stop_event.is_set():
-                                engine.iterate()
-                                time.sleep(.03)
-                            engine.stop()
-                        finally:
-                            engine.endLoop()
-                        while not samples.empty():
-                            samples.get_nowait()
+                        self._speak(reply)
+                        self._clear_audio(samples)
                         recognizer.Reset()
                         if action != "sleep":
                             gate.resume()
@@ -267,17 +308,8 @@ class DesktopVoice:
             self.stop_event.set()
             self.microphone = None
             self.connection = None
-            if engine:
-                try:
-                    engine.stop()
-                except Exception:
-                    pass
-                engine = None
-            if com:
-                try:
-                    com.CoUninitialize()
-                except Exception:
-                    pass
+            if self.speech is not None:
+                self.speech.stop(source='voice')
             if self.voice_token:
                 try:
                     with httpx.Client(headers={"X-Assistant-Token": self.token}, trust_env=False, timeout=3) as revoke:

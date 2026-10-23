@@ -627,32 +627,167 @@ def test_browser_codex_chat_selector_confirmation_and_no_api(page, browser_app):
     assert not app.state.model_requests
 
 
-def test_download_update_button_works_without_public_manifest(page):
+def test_download_update_button_reports_missing_source_without_navigation(page):
     page.route('**/api/updates', lambda route: route.fulfill(status=409,
-        content_type='application/json', body=json.dumps({'detail': '更新源尚未发布或仓库需要登录；请点击下载更新。'})))
-    requests = []
-    def download_page(route):
-        requests.append(route.request)
-        route.fulfill(status=200, content_type='text/html', body='<p>登录 GitHub 下载构建产物</p>')
-    page.context.route('https://github.com/XiaYuLuo22/xiayuluo/actions/workflows/windows-app.yml', download_page)
+        json={'detail': '签名更新源尚未发布，无法下载更新；当前版本保留。'}))
+    opened, installed = [], []
+    page.context.on('page', lambda popup: opened.append(popup))
+    page.route('**/api/updates/install', lambda route: installed.append(route.request))
     original = page.url
     page.locator('[data-view="settings"]').click()
     button = page.get_by_role('button', name='↓ 下载更新', exact=True)
     playwright_api.expect(button).to_be_visible()
-    page.locator('#check-update').click()
-    playwright_api.expect(page.locator('#update-status')).to_contain_text('需要登录')
-    playwright_api.expect(button).to_be_visible()
-    with page.expect_popup() as opening:
-        button.click()
-    popup = opening.value
-    popup.wait_for_load_state()
-    assert popup.url == 'https://github.com/XiaYuLuo22/xiayuluo/actions/workflows/windows-app.yml'
+    assert button.get_attribute('href') is None
+    button.click()
+    playwright_api.expect(page.locator('#update-status')).to_contain_text('当前版本保留')
     assert page.url == original
-    assert requests and 'x-assistant-token' not in requests[0].headers
-    assert 'referer' not in requests[0].headers
-    playwright_api.expect(page.locator('#update-status')).to_contain_text('不代表更新已安装')
+    assert not opened and not installed
     playwright_api.expect(page.locator('#install-update')).to_be_hidden()
-    popup.close()
+
+
+@pytest.mark.parametrize('available,supported,expected', [(True, True, 1), (False, True, 0), (True, False, 0)])
+def test_download_update_button_checks_then_installs_inside_app(page, available, supported, expected):
+    page.evaluate("async () => { await post('/api/automation', {mode: 'auto'}); await refreshStatus(); }")
+    page.route('**/api/updates', lambda route: route.fulfill(json={'available': available,
+        'version': '9.0.0', 'current': '0.1.11', 'notes': '测试签名发布', 'install_supported': supported}))
+    installed, opened = [], []
+
+    def install(route):
+        installed.append(route.request.post_data_json)
+        route.fulfill(json={'restarting': True})
+
+    page.route('**/api/updates/install', install)
+    page.context.on('page', lambda popup: opened.append(popup))
+    page.locator('[data-view="settings"]').click()
+    page.locator('#download-update').click()
+    if expected:
+        playwright_api.expect(page.locator('#update-status')).to_contain_text('正在重启安装')
+    elif available:
+        playwright_api.expect(page.locator('#update-status')).to_contain_text('源码版')
+    else:
+        playwright_api.expect(page.locator('#update-status')).to_contain_text('暂无更高版本')
+    assert len(installed) == expected and not opened
+    if expected:
+        assert installed == [{'confirm': True}]
+
+
+def attach_speech(page, app):
+    from test_speech_api import SpeechStub
+    native = SpeechStub()
+    app.state.speech = native
+    page.evaluate('refreshSpeech()')
+    playwright_api.expect(page.locator('#reply-speech')).to_have_text('朗读：开')
+    return native
+
+
+def test_reply_speech_automatically_reads_new_answer_without_microphone_and_not_history(page, browser_app):
+    _, app = browser_app
+    native = attach_speech(page, app)
+    page.locator('#prompt').fill('你好')
+    page.locator('#send').click()
+    playwright_api.expect(page.locator('.message.assistant .message-body').last).to_have_text('你好，这是流式回复。')
+    playwright_api.expect(page.locator('#stop')).to_be_hidden()
+    playwright_api.expect(page.locator('#stop-speaking')).to_be_visible()
+    assert native.calls and len(native.calls) == 1
+    assert native.calls[0][0] == '你好，这是流式回复。'
+    assert app.state.voice is None
+    page.evaluate('syncViews()')
+    page.reload()
+    playwright_api.expect(page.locator('#reply-speech')).to_have_text('朗读：开')
+    playwright_api.expect(page.locator('#messages')).to_contain_text('你好，这是流式回复。')
+    assert len(native.calls) == 1
+
+
+def test_reply_speech_stop_and_switch_are_independent_of_microphone(page, browser_app):
+    _, app = browser_app
+    native = attach_speech(page, app)
+    native.speaking = True
+    page.evaluate('refreshSpeech()')
+    page.locator('#stop-speaking').click()
+    playwright_api.expect(page.locator('#stop-speaking')).to_be_hidden()
+    assert not native.speaking and native.enabled
+    page.locator('#reply-speech').click()
+    playwright_api.expect(page.locator('#reply-speech')).to_have_attribute('aria-pressed', 'false')
+    page.locator('#prompt').fill('静音问题')
+    page.locator('#send').click()
+    playwright_api.expect(page.locator('.message.assistant .message-body').last).to_have_text('你好，这是流式回复。')
+    playwright_api.expect(page.locator('#stop')).to_be_hidden()
+    assert not native.calls and not native.enabled and app.state.voice is None
+    page.locator('[data-view="settings"]').click()
+    page.locator('#reply-speech-setting').click()
+    playwright_api.expect(page.locator('#reply-speech-setting')).to_be_checked()
+    assert native.enabled
+
+
+@pytest.mark.parametrize('kind', ['incomplete', 'error', 'pending'])
+def test_reply_speech_never_reads_unsuccessful_or_pending_replies(page, browser_app, kind):
+    _, app = browser_app
+    native = attach_speech(page, app)
+    packets = [{'type': 'text', 'text': '未完成的内容'}]
+    if kind == 'error': packets.append({'type': 'error', 'message': '本轮失败'})
+    if kind == 'pending':
+        packets.extend([{'type': 'action', 'action': {'id': 'fixture', 'tool': 'remember',
+            'title': '保存记忆', 'arguments': {'tier': 'second', 'kind': 'fact', 'content': '测试'}}}, {'type': 'done'}])
+    page.route('**/api/chat', lambda route: route.fulfill(content_type='text/event-stream',
+        body=''.join('data: ' + json.dumps(item) + '\n\n' for item in packets)))
+    page.locator('#prompt').fill('测试停止或待确认')
+    page.locator('#send').click()
+    if kind == 'pending':
+        playwright_api.expect(page.locator('.action-card')).to_be_visible()
+    else:
+        playwright_api.expect(page.locator('.message.assistant.error')).to_be_visible()
+    playwright_api.expect(page.locator('#stop')).to_be_hidden()
+    assert native.calls == []
+
+
+def test_reply_speech_failure_preserves_successful_text_and_session_switch_stops_audio(page, browser_app):
+    _, app = browser_app
+    native = attach_speech(page, app)
+    native.fail = RuntimeError('private driver error')
+    page.locator('#prompt').fill('朗读失败仍然显示回复')
+    page.locator('#send').click()
+    playwright_api.expect(page.locator('.message.assistant .message-body').last).to_have_text('你好，这是流式回复。')
+    playwright_api.expect(page.locator('#stop')).to_be_hidden()
+    playwright_api.expect(page.locator('.message.assistant .message-body').last).to_have_text('你好，这是流式回复。')
+    assert page.locator('.message.assistant.error').count() == 0
+    playwright_api.expect(page.locator('#toast')).to_contain_text('文字回复已完成')
+    native.speaking = True
+    previous = native.generation
+    page.locator('#new-chat').click()
+    playwright_api.expect(page.locator('#welcome')).to_be_visible()
+    assert not native.speaking and native.generation > previous
+
+
+def test_reply_speech_off_then_on_during_generation_never_reads_old_reply(page, browser_app):
+    _, app = browser_app
+    native = attach_speech(page, app)
+    page.locator('#prompt').fill('回复时关闭再开启声音')
+    page.locator('#send').click()
+    playwright_api.expect(page.locator('#stop')).to_be_visible()
+    page.locator('#reply-speech').click()
+    playwright_api.expect(page.locator('#reply-speech')).to_have_attribute('aria-pressed', 'false')
+    page.locator('#reply-speech').click()
+    playwright_api.expect(page.locator('#reply-speech')).to_have_attribute('aria-pressed', 'true')
+    playwright_api.expect(page.locator('#stop')).to_be_hidden()
+    assert native.enabled and not native.calls
+
+
+def test_startup_history_restore_does_not_override_user_navigation(page, browser_app):
+    _, app = browser_app
+    session = page.evaluate("post('/api/sessions')")['id']
+    app.state.memory.append(session, 'user', '之前的对话')
+    app.state.memory.append(session, 'assistant', '只恢复文字，不抢走当前页面。')
+    held = []
+    page.route(f'**/api/sessions/{session}', lambda route: held.append((route, route.fetch())))
+    with page.expect_request(f'**/api/sessions/{session}'):
+        page.reload()
+    page.locator('[data-view="settings"]').click()
+    playwright_api.expect(page.locator('#view-settings')).to_be_visible()
+    assert held
+    route, response = held[0]
+    route.fulfill(response=response)
+    playwright_api.expect(page.locator('#messages')).to_contain_text('只恢复文字')
+    playwright_api.expect(page.locator('#view-settings')).to_be_visible()
 
 
 def test_private_source_mode_never_auto_checks_or_imports_updates(page):

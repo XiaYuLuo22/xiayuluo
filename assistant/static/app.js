@@ -68,6 +68,81 @@ async function connectCodex(refresh = false) {
 }
 $('#connect-codex').addEventListener('click', guarded(() => connectCodex(true)));
 
+// Native speech is separate from microphone/voice-lease authorization. No Web
+// speech/network fallback, and no playback triggered by rendering old history.
+let speechState = { available: false, enabled: false, speaking: false, generation: 0 };
+let speechKnown = false, speechChanging = false, speechVersion = 0;
+function renderSpeech() {
+  const enabled = speechKnown && speechState.enabled;
+  const disabled = speechChanging || !speechKnown || (!enabled && !speechState.available);
+  $('#reply-speech').textContent = `朗读：${enabled ? '开' : '关'}`;
+  $('#reply-speech').setAttribute('aria-pressed', String(enabled));
+  $('#reply-speech').disabled = disabled;
+  $('#reply-speech-setting').checked = !!enabled;
+  $('#reply-speech-setting').disabled = disabled;
+  $('#stop-speaking').hidden = !(speechState.speaking || speechState.phase === 'queued');
+  $('#speech-status').textContent = !speechKnown ? '无法核实系统朗读状态；文字聊天仍可使用。'
+    : `${speechState.message || (enabled ? '新回复完成后自动朗读。' : '回复朗读已关闭。')}${!speechState.available && speechState.reason ? ` ${speechState.reason}` : ''}${speechState.truncated ? ' 本轮只朗读了部分内容，全文请看聊天。' : ''}`;
+  $('#reply-speech').title = $('#speech-status').textContent;
+}
+function acceptSpeech(info) {
+  if (!info || typeof info.enabled !== 'boolean' || !Number.isInteger(info.generation)) throw new Error('朗读服务状态格式无效。');
+  if (speechKnown && info.generation < speechState.generation) return;
+  speechState = info; speechKnown = true; renderSpeech();
+}
+async function refreshSpeech() {
+  const version = speechVersion;
+  try {
+    const info = await json('/api/speech');
+    if (version === speechVersion) acceptSpeech(info);
+  } catch { if (version === speechVersion) { speechKnown = false; renderSpeech(); } }
+}
+async function stopSpeech(quiet = false) {
+  const version = ++speechVersion;
+  if (!speechKnown) await refreshSpeech();
+  if (speechKnown && !speechState.available && !speechState.speaking) return null;
+  try {
+    const info = await post('/api/speech/stop');
+    if (version !== speechVersion) return null;
+    acceptSpeech(info); return speechState.generation;
+  }
+  catch (error) {
+    if (version === speechVersion) { speechKnown = false; renderSpeech(); }
+    if (!quiet) toast(`停止朗读未确认：${error.message}`);
+    return null;
+  }
+}
+async function toggleSpeech() {
+  if (speechChanging || !speechKnown) return;
+  const enabled = !speechState.enabled;
+  speechChanging = true; const version = ++speechVersion; renderSpeech();
+  try {
+    const info = await post('/api/speech', { enabled });
+    if (version === speechVersion) acceptSpeech(info);
+    else await refreshSpeech();
+  }
+  catch (error) { await refreshSpeech(); toast(`朗读设置失败：${error.message}`); }
+  finally { speechChanging = false; renderSpeech(); }
+}
+async function speakCompletedReply(text, generation) {
+  if (!text.trim() || generation === null || !speechKnown || !speechState.enabled ||
+      !speechState.available || generation !== speechState.generation) return;
+  const version = speechVersion;
+  try {
+    const info = await post('/api/speech/speak', { text, generation });
+    if (version === speechVersion) acceptSpeech(info);
+  }
+  catch (error) {
+    if (version !== speechVersion) return;
+    // A speaker failure must not mark a successfully saved answer unfinished.
+    toast(`文字回复已完成，朗读未开始：${error.message}`);
+    await refreshSpeech();
+  }
+}
+$('#reply-speech').addEventListener('click', guarded(toggleSpeech));
+$('#reply-speech-setting').addEventListener('change', guarded(toggleSpeech));
+$('#stop-speaking').addEventListener('click', () => void stopSpeech());
+
 let updateBusy = false;
 let voiceSession = null;
 let voiceRunning = false;
@@ -99,23 +174,17 @@ $('#voice-indicator').addEventListener('click', guarded(async () => {
 $('#voice-session').addEventListener('click', guarded(async () => {
   if (voiceSession && !state.busy) { await refreshSessions(); await loadSession(voiceSession); await openView('chat'); }
 }));
-async function loadUpdateDownloads() {
-  try {
-    const info = await json('/api/updates/downloads');
-    const url = new URL(info.windows_url);
-    if (url.origin !== 'https://github.com' || url.username || url.password || url.search || url.hash) throw new Error('下载地址配置无效。');
-    $('#download-update').href = url.href;
-  } catch { /* Keep the pinned GitHub fallback available without a successful update check. */ }
-}
-$('#download-update').addEventListener('click', () => {
-  $('#update-status').textContent = '已请求在系统浏览器打开 GitHub 下载页；私有仓库需登录。请选择成功构建下载，打开页面不代表更新已安装。';
+$('#download-update').addEventListener('click', async () => {
+  if (updateBusy || state.busy) return toast('请先完成或停止当前任务。');
+  const result = await checkForUpdates();
+  if (result?.available && result.install_supported) await installSignedUpdate();
 });
 let lastUpdateCheck = 0;
 async function checkForUpdates(automatic = false) {
   if (updateBusy || !state.token) return;
   if (automatic && (!state.status?.runtime.update_supported || document.hidden || state.busy)) return;
   lastUpdateCheck = Date.now();
-  updateBusy = true; $('#check-update').disabled = true; $('#install-update').hidden = true;
+  updateBusy = true; $('#check-update').disabled = true; $('#download-update').disabled = true; $('#install-update').hidden = true;
   $('#update-status').textContent = '正在检查签名更新清单…'; $('#update-notes').hidden = true;
   try {
     const result = await json('/api/updates');
@@ -127,26 +196,29 @@ async function checkForUpdates(automatic = false) {
     $('#update-available').hidden = !result.available;
     $('#update-available').title = result.available ? `发现 ${result.version}，打开更新设置` : '';
     if (result.available && automatic) toast(`发现夏鱼洛 ${result.version}，可在设置中更新。`);
+    return result;
   } catch (error) {
     $('#update-status').textContent = error.message;
     $('#update-available').hidden = true;
+    return null;
   }
-  finally { updateBusy = false; $('#check-update').disabled = false; }
+  finally { updateBusy = false; $('#check-update').disabled = false; $('#download-update').disabled = false; }
 }
 $('#check-update').addEventListener('click', () => void checkForUpdates());
 $('#update-available').addEventListener('click', guarded(() => openView('settings')));
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && Date.now() - lastUpdateCheck >= 3600000) void checkForUpdates(true);
 });
-$('#install-update').addEventListener('click', async () => {
+async function installSignedUpdate() {
   if (updateBusy || state.busy) return toast('请先完成或停止当前任务。');
   if (!approveLocally('下载并校验新版本，然后退出并重启夏鱼洛？配置、聊天和四级记忆保留，安装位置不变。')) return;
-  updateBusy = true; $('#install-update').disabled = true; $('#check-update').disabled = true;
+  updateBusy = true; $('#install-update').disabled = true; $('#check-update').disabled = true; $('#download-update').disabled = true;
   $('#update-status').textContent = '正在下载并校验，请勿关闭 App；完成后自动重启…';
-  try { await post('/api/updates/install', { confirm: true }); $('#update-status').textContent = '校验通过，正在重启安装…'; }
+  try { await stopSpeech(true); await post('/api/updates/install', { confirm: true }); $('#update-status').textContent = '校验通过，正在重启安装…'; }
   catch (error) { $('#update-status').textContent = error.message; }
-  finally { updateBusy = false; $('#install-update').disabled = false; $('#check-update').disabled = false; }
-});
+  finally { updateBusy = false; $('#install-update').disabled = false; $('#check-update').disabled = false; $('#download-update').disabled = false; }
+}
+$('#install-update').addEventListener('click', installSignedUpdate);
 $('#import-update').addEventListener('click', async () => {
   if (updateBusy || state.busy) return toast('请先完成或停止当前任务。');
   if (!approveLocally('选择下载好的签名更新包，校验后退出并重启夏鱼洛？配置和四级记忆保留。')) return;
@@ -351,6 +423,7 @@ function renderSessions() {
     remove.addEventListener('click', guarded(async () => {
       if (state.busy) return toast('请先等待任务完成或停止。');
       if (!approveLocally('删除这段对话及从它产生的记忆？手动另存的记忆会保留。')) return;
+      if (state.session === session.id) await stopSpeech(true);
       await json(`/api/sessions/${session.id}`, { method: 'DELETE' });
       if (state.session === session.id) { state.session = null; resetChat(); }
       await refreshSessions(); await refreshStatus();
@@ -363,14 +436,16 @@ function resetChat() {
   $('#messages').replaceChildren(); $('#welcome').hidden = false;
   $('#retrieval-note').hidden = true;
 }
-async function loadSession(id) {
+async function loadSession(id, { navigate = true } = {}) {
   if (state.busy) return toast('请先等待任务完成或停止。');
+  if (state.session !== id) await stopSpeech(true);
   const data = await json(`/api/sessions/${id}`);
   if (state.session !== id) debug.reset();
   state.session = id; resetChat();
   data.messages.forEach((item) => message(item.role, item.content));
   state.historyStamp = historyStamp(data.messages);
-  await openView('chat'); await refreshSessions(); await refreshStatus(); scrollChat();
+  if (navigate) await openView('chat');
+  await refreshSessions(); await refreshStatus(); scrollChat();
 }
 async function ensureSession() {
   if (!state.session) state.session = (await post('/api/sessions')).id;
@@ -378,6 +453,7 @@ async function ensureSession() {
 }
 async function newChat() {
   if (state.busy) return;
+  await stopSpeech(true);
   state.session = (await post('/api/sessions')).id;
   debug.reset();
   resetChat(); setMode('chat'); await openView('chat'); await refreshSessions(); await refreshStatus(); $('#prompt').focus();
@@ -387,9 +463,11 @@ async function consumeStream(path, body, target) {
   state.controller = new AbortController(); setBusy(true);
   debug.begin(path);
   target.body.replaceChildren(el('span', 'thinking', '夏鱼洛正在处理'));
-  let text = '', finished = false, reader;
+  let text = '', finished = false, pendingAction = false, reader;
+  let speechGeneration = null;
   let outcome = 'failed';
   try {
+    speechGeneration = await stopSpeech(true);
     const response = await api(path, { method: 'POST', body: JSON.stringify(body), signal: state.controller.signal });
     reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = '';
     while (true) {
@@ -410,7 +488,7 @@ async function consumeStream(path, body, target) {
           $('#retrieval-note').textContent = count ? `▦ 本轮参考了 ${count} 条相关记忆 · 可在四级记忆中管理` : '';
           $('#retrieval-note').title = event.items.map((item) => `${tierName(item.tier)}：${item.content}`).join('\n');
         }
-        if (event.type === 'action') addActionCard(target.holder, event.action);
+        if (event.type === 'action') { pendingAction = true; addActionCard(target.holder, event.action); }
         if (event.type === 'done') finished = true;
       }
       if (done) break;
@@ -418,6 +496,7 @@ async function consumeStream(path, body, target) {
     if (!finished) throw new Error('连接提前结束，本轮回复未完成。');
     if (!text) target.body.textContent = '任务已完成。';
     outcome = 'completed';
+    if (!pendingAction && !state.controller.signal.aborted) await speakCompletedReply(text, speechGeneration);
   } catch (error) {
     target.row.classList.add('error');
     const note = error.name === 'AbortError' ? '已停止。已执行的操作不会撤回。' : error.message;
@@ -612,7 +691,7 @@ async function syncViews() {
     await refreshStatus();
     if (usingCodex() && Date.now() - codexLastAttempt > 30000) void connectCodex();
     const sessions = await refreshSessions();
-    if (state.session === observedSession && state.session && !sessions.some(item => item.id === state.session)) { state.session = null; resetChat(); }
+    if (state.session === observedSession && state.session && !sessions.some(item => item.id === state.session)) { await stopSpeech(true); state.session = null; resetChat(); }
     if (!$('#view-chat').hidden && state.session) {
       const session = state.session;
       const data = await json(`/api/sessions/${session}`);
@@ -679,7 +758,7 @@ $('#prompt').addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('#chat-form').requestSubmit(); }
 });
 $('#mode-toggle').addEventListener('click', () => setMode(state.mode === 'chat' ? 'codex' : 'chat'));
-$('#stop').addEventListener('click', () => state.controller?.abort());
+$('#stop').addEventListener('click', () => { state.controller?.abort(); void stopSpeech(true); });
 $('#new-chat').addEventListener('click', guarded(newChat));
 document.querySelectorAll('[data-view]').forEach((node) => node.addEventListener('click', guarded(() => openView(node.dataset.view))));
 document.querySelectorAll('[data-open]').forEach((node) => node.addEventListener('click', guarded(() => openView(node.dataset.open))));
@@ -698,6 +777,7 @@ $('#memory-form').addEventListener('submit', guarded(async (event) => {
 $('#clear-memory').addEventListener('click', guarded(async () => {
   if (state.busy) return toast('请先停止正在执行的任务。');
   if (!approveLocally('清空所有层级的记忆及全部历史对话？此操作无法撤销。')) return;
+  await stopSpeech(true);
   await json('/api/memories', { method: 'DELETE' }); state.session = null; resetChat();
   await refreshSessions(); await renderMemories(); toast('所有记忆及历史对话已清空。');
 }));
@@ -714,10 +794,11 @@ $('#plugin-form').addEventListener('submit', guarded(async (event) => {
 }));
 guarded(async () => {
   const bootstrap = await (await fetch('/api/bootstrap')).json(); state.token = bootstrap.token;
-  void loadUpdateDownloads();
   void refreshVoice();
   setInterval(() => void refreshVoice(), 3000);
-  await refreshStatus(); const sessions = await refreshSessions(); if (sessions.length) await loadSession(sessions[0].id);
+  void refreshSpeech();
+  setInterval(() => void refreshSpeech(), 2000);
+  await refreshStatus(); const sessions = await refreshSessions(); if (sessions.length) await loadSession(sessions[0].id, { navigate: false });
   if (usingCodex()) void connectCodex();
   void checkForUpdates(true);
   setInterval(() => void checkForUpdates(true), 3600000);

@@ -17,8 +17,42 @@ class VoicePackage : ReactPackage {
     override fun createViewManagers(context: ReactApplicationContext): List<ViewManager<*, *>> = emptyList()
 }
 
-class VoiceModule(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
+class VoiceModule(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context), LifecycleEventListener {
+    init {
+        SpeechOutput.initialize(context)
+        context.addLifecycleEventListener(this)
+        SpeechOutput.setForeground((context.currentActivity as? androidx.lifecycle.LifecycleOwner)
+            ?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) == true)
+    }
     override fun getName() = "XiayuluoVoice"
+    override fun onHostResume() { SpeechOutput.setForeground(true) }
+    override fun onHostPause() { SpeechOutput.setForeground(false) }
+    override fun onHostDestroy() { SpeechOutput.setForeground(false) }
+    override fun invalidate() {
+        context.removeLifecycleEventListener(this)
+        SpeechOutput.setForeground(false)
+        super.invalidate()
+    }
+    @ReactMethod fun speechStatus(promise: Promise) { promise.resolve(SpeechOutput.status().toString()) }
+    @ReactMethod fun configureSpeech(enabled: Boolean, promise: Promise) {
+        SpeechOutput.configure(enabled)
+        promise.resolve(SpeechOutput.status().toString())
+    }
+    @ReactMethod fun stopSpeech(promise: Promise) {
+        SpeechOutput.stop("chat")
+        promise.resolve(null)
+    }
+    @ReactMethod fun speakReply(text: String, promise: Promise) {
+        val generation = SpeechOutput.requestChatGeneration()
+        if (text.isBlank() || text.length > 12000) {
+            promise.reject("SPEECH_TEXT", "朗读内容为空或超过单次长度限制。")
+            return
+        }
+        Thread({
+            try { promise.resolve(SpeechOutput.speak(context, text, "chat", generation)) }
+            catch (_: Exception) { promise.reject("SPEECH_OUTPUT", "回复朗读失败，请检查系统本地中文音色；文字回复不受影响。") }
+        }, "xiayuluo-chat-speech").start()
+    }
     @ReactMethod fun status(promise: Promise) {
         val ready = try { context.assets.open("voice-model/am/final.mdl").close(); true } catch (_: Exception) { false }
         val power = context.getSystemService(PowerManager::class.java)

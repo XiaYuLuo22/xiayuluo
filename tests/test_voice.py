@@ -1,6 +1,9 @@
 import json
 from pathlib import Path
 import zipfile
+from queue import Queue
+from threading import Event, Thread
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -88,6 +91,66 @@ def test_voice_is_opt_in_and_unavailable_on_cloud():
         voice.start()
     voice.stop()
     assert voice.stop_event.is_set()
+
+
+def test_voice_reuses_speaker_and_muted_speech_never_stops_microphone():
+    calls = []
+
+    class Muted:
+        def set_activity_callback(self, callback):
+            self.callback = callback
+
+        def say(self, text, *, source):
+            calls.append((text, source))
+            raise ValueError('回复朗读已关闭。')
+
+        def stop(self, source=None):
+            calls.append(('stop', source))
+
+    shared = Muted()
+    voice = DesktopVoice('http://127.0.0.1:12345', 'fixture', speech=shared)
+    voice._speak('只显示文字')
+    assert not voice.stop_event.is_set()
+    assert calls == [('只显示文字', 'voice')]
+    voice.stop()
+    assert calls[-1] == ('stop', 'voice')
+
+
+def test_external_chat_playback_pauses_and_flushes_asr_then_resumes():
+    voice = DesktopVoice('http://127.0.0.1:12345', 'fixture')
+    samples = Queue()
+    samples.put(b'old buffered audio')
+    paused, finished = Event(), Event()
+    calls = []
+    stream = SimpleNamespace(stop=lambda: (calls.append('stop'), paused.set()), start=lambda: calls.append('start'))
+    recognizer = SimpleNamespace(Reset=lambda: calls.append('reset'))
+    voice._speech_activity(True)
+    worker = Thread(target=lambda: (voice._pause_for_playback(stream, samples, recognizer), finished.set()))
+    worker.start()
+    assert paused.wait(2)
+    assert samples.empty()
+    samples.put(b'possible speaker tail')
+    voice._speech_activity(False)
+    assert finished.wait(2)
+    worker.join(2)
+    assert samples.empty() and calls == ['stop', 'reset', 'reset', 'start']
+    assert voice.phase == 'listening' and not voice.stop_event.is_set()
+
+
+def test_stopping_microphone_during_playback_never_restarts_it():
+    voice = DesktopVoice('http://127.0.0.1:12345', 'fixture')
+    calls = []
+    paused = Event()
+    stream = SimpleNamespace(stop=lambda: paused.set(), start=lambda: calls.append('unexpected restart'))
+    recognizer = SimpleNamespace(Reset=lambda: None)
+    voice._speech_activity(True)
+    worker = Thread(target=lambda: voice._pause_for_playback(stream, Queue(), recognizer))
+    worker.start()
+    assert paused.wait(2)
+    voice.stop()
+    worker.join(2)
+    voice._speech_activity(False)
+    assert not worker.is_alive() and not calls
 
 
 def test_voice_routes_auth_confirmation_and_no_mobile_access(client_factory):

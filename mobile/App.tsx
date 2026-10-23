@@ -6,6 +6,7 @@ import { StatusBar } from 'expo-status-bar';
 import { UpdateCard } from './src/UpdateCard';
 import { VoiceCard } from './src/VoiceCard';
 import { useVoice } from './src/voice';
+import { useReplySpeech } from './src/speech';
 import { Client, loadConnection, pairDevice, saveConnection, type Action, type Connection,
   type Memory, type Message, type Session, type Workspace } from './src/client';
 
@@ -45,6 +46,7 @@ function Home() {
   // operations still require an online paired connection and observed workspace.
   const automatic = workspace?.approvals !== 'desktop-only';
   const voice = useVoice(connection, ready, online);
+  const speech = useReplySpeech(!!connection, online);
 
   useEffect(() => {
     let alive = true;
@@ -85,6 +87,7 @@ function Home() {
     if (busy || !ready) return;
     setBusy(true);
     try {
+      await speech.stop();
       const value = await pairDevice(url.trim(), code.trim(), name.trim() || '我的手机');
       await saveConnection(value); setConnection(value); setCode(''); setNotice('配对成功，会话和记忆由电脑统一管理。'); setTab('chat');
     } catch (error) { setNotice(errorText(error)); }
@@ -93,6 +96,7 @@ function Home() {
   async function disconnect() {
     if (busy) return;
     try {
+      await speech.stop();
       await voice.stop();
       await saveConnection(null); setConnection(null); setOnline(false); setSelected(null);
       setMessages([]); setSessions([]); setMemories([]); setTasks([]); setWorkspace(null); setDraft(''); setMemoryDraft('');
@@ -107,9 +111,11 @@ function Home() {
     }
     const prompt = draft.trim(), client = new Client(connection);
     const abort = new AbortController(); controller.current = abort;
-    setBusy(true); setNotice(''); let text = '';
+    setBusy(true); setNotice(''); let text = '', pending = false, complete = false;
     const targetId = -Date.now();
     try {
+      const speechTurn = await speech.beginTurn();
+      if (abort.signal.aborted) return;
       const session = selected || (await client.json<Session>('sessions', {})).id;
       setSelected(session); setDraft('');
       setMessages(previous => [...previous, { id: targetId - 1, role: 'user', content: prompt },
@@ -120,13 +126,21 @@ function Home() {
           text += packet.text;
           setMessages(previous => previous.map(item => item.id === targetId ? { ...item, content: text } : item));
         }
-        if (packet.type === 'action') setNotice('请求已提交，请到电脑端「待确认任务」核实后执行。有效期 2 分钟。');
+        if (packet.type === 'action') { pending = true; setNotice('请求已提交，请到电脑端「待确认任务」核实后执行。有效期 2 分钟。'); }
+        if (packet.type === 'done') complete = true;
       });
+      // Only this freshly completed submission is offered. History polling and
+      // the native voice session own no path into this playback controller.
+      void speech.completeTurn(speechTurn, text, { mode, complete, pending, aborted: abort.signal.aborted });
     } catch (error) {
       const note = abort.signal.aborted ? '已停止，本轮不自动重发。' : errorText(error);
       setNotice(note); setDraft(current => current || prompt);
       setMessages(previous => previous.map(item => item.id === targetId ? { ...item, content: `${text}\n[未完成] ${note}` } : item));
     } finally { controller.current = null; setBusy(false); }
+  }
+  function stopReply() { controller.current?.abort(); void speech.stop(); }
+  function selectSession(id: string | null) {
+    void speech.stop(); setSelected(id); setMessages([]); setTab('chat');
   }
   async function saveMemory() {
     if (!connection || !online || busy || !memoryDraft.trim() || tier === 'temporary') return;
@@ -148,7 +162,7 @@ function Home() {
     <View style={s.header}>
       <Pressable accessibilityLabel="会话历史" onPress={() => setHistory(true)} disabled={busy}><Text style={s.headerIcon}>☰</Text></Pressable>
       <View style={s.headerBrand}><Text style={s.brand}>夏鱼洛</Text><Text style={s.subtle}>{tabs.find(item => item[0] === tab)?.[2]}</Text></View>
-      <Pressable accessibilityLabel="新建对话" disabled={busy} onPress={() => { setSelected(null); setMessages([]); setTab('chat'); }}><Text style={s.headerIcon}>＋</Text></Pressable>
+      <Pressable accessibilityLabel="新建对话" disabled={busy} onPress={() => selectSession(null)}><Text style={s.headerIcon}>＋</Text></Pressable>
     </View>
     <View style={s.connection}><View style={[s.dot, { backgroundColor: online ? '#408d68' : '#c4a66b' }]} />
       <Text style={s.connectionText}>{connection ? online ? '已连接电脑 · 前台每 5 秒同步' : '电脑未连接 · 不会自动重发' : '本机未配对 · 连接你的电脑继续'}</Text></View>
@@ -171,7 +185,11 @@ function Home() {
         editable={!busy} accessibilityLabel="输入消息" placeholder="和夏鱼洛聊聊，或交给我一件事…" placeholderTextColor="#93a18e" />
         {mode === 'codex' && <Text style={s.hint}>目标：{workspace?.name || '等待连接电脑'} · {workspace?.sandbox === 'workspace-write' ? '项目可写' : '只读检查'} · {automatic ? '发送后直接执行' : '电脑逐次确认'}</Text>}
         <View style={s.composerBar}><Pressable disabled={busy} onPress={() => setMode(mode === 'chat' ? 'codex' : 'chat')}><Text style={s.mode}>{mode === 'chat' ? '◌ 日常对话' : '⌘ Codex 编程'} ⌄</Text></Pressable>
-          <Pressable accessibilityLabel={busy ? '停止回复' : '发送消息'} disabled={busy && !controller.current} style={s.send} onPress={() => busy ? controller.current?.abort() : void send()}><Text style={s.sendText}>{busy ? '■' : '↑'}</Text></Pressable></View>
+          <Pressable accessibilityRole="switch" accessibilityLabel="回答朗读" accessibilityState={{ checked: speech.known && speech.status.enabled, disabled: !speech.supported || speech.changing || !speech.known }}
+            disabled={!speech.supported || speech.changing || !speech.known} onPress={() => void speech.configure(!speech.status.enabled)}><Text style={s.mode}>{speech.known ? `朗读：${speech.status.enabled ? '开' : '关'}` : '朗读状态未知'}</Text></Pressable>
+          {speech.speaking && <Pressable accessibilityLabel="停止朗读" onPress={() => void speech.stop()}><Text style={s.mode}>停止朗读</Text></Pressable>}
+          <Pressable accessibilityLabel={busy ? '停止回复' : '发送消息'} disabled={busy && !controller.current} style={s.send} onPress={() => busy ? stopReply() : void send()}><Text style={s.sendText}>{busy ? '■' : '↑'}</Text></Pressable></View>
+        <Text style={s.speechHint}>{speech.error || speech.status.message}</Text>
       </View><Text style={s.caption}>回答可能有误 · {automatic ? '已授权默认同意，执行后变更不会自动撤回' : '电脑工具执行前需在电脑确认'}</Text>
     </KeyboardAvoidingView>}
     {tab === 'memory' && <ScrollView contentContainerStyle={s.page}><Text style={s.eyebrow}>MEMORY</Text><Text style={s.title}>把重要的事留下</Text>
@@ -191,7 +209,7 @@ function Home() {
         {task.workspace && <Text style={s.hint}>提交到：{task.workspace.name} · {task.workspace.sandbox === 'workspace-write' ? '项目可写' : '只读'}</Text>}
         {task.tool === 'codex_task' && <Text selectable style={s.cardText}>{task.arguments.prompt?.slice(0, 320)}</Text>}
         <Text style={s.hint}>等待电脑确认 · 请求 2 分钟后过期</Text>
-        <Button label="打开对应会话" disabled={busy} onPress={() => { setSelected(task.session_id); setMessages([]); setTab('chat'); }} />
+        <Button label="打开对应会话" disabled={busy} onPress={() => selectSession(task.session_id)} />
       </View>)}
       <Text style={s.hint}>执行中和完成结果请查看原会话；待确认项消失不代表成功，也可能已取消或过期。电脑执行过程不在此实时直播。断线后先查看历史，不自动重发。</Text>
       {!tasks.length && <Text style={s.empty}>{online ? '暂时没有待确认任务' : '电脑离线时不执行任务'}</Text>}
@@ -201,7 +219,14 @@ function Home() {
       <Text style={s.description}>手机、电脑、开发者模式，共用同一份对话与四级记忆。仅与你主动配对的电脑连接。</Text>
       <WorkspaceCard workspace={workspace} online={online} />
       <UpdateCard disabled={busy} automatic={automatic} />
-      <VoiceCard voice={voice} disabled={busy} automatic={automatic} onSession={id => { if (!busy) { setSelected(id); setMessages([]); setTab('chat'); } }} />
+      <View style={s.card}><Text style={s.cardText}>回答朗读 · 系统中文音色</Text>
+        <Text style={s.hint}>普通文字对话完整回答后自动朗读，不必开启麦克风；不朗读历史或未完成回复。当前只使用本机离线中文声音，后续可扩展音源选择。</Text>
+        <Button label={speech.known ? `回答朗读：${speech.status.enabled ? '开 · 点击关闭' : '关 · 点击开启'}` : '正在读取朗读配置'}
+          disabled={!speech.supported || speech.changing || !speech.known} onPress={() => void speech.configure(!speech.status.enabled)} />
+        {speech.speaking && <Button label="停止本次朗读" onPress={() => void speech.stop()} />}
+        <Text style={s.hint}>{speech.error || speech.status.message}</Text>
+      </View>
+      <VoiceCard voice={voice} disabled={busy} automatic={automatic} onSession={id => { if (!busy) selectSession(id); }} />
       {connection ? <View style={s.card}><Text style={s.cardText}>{connection.name}</Text><Text selectable style={s.hint}>{connection.url}</Text>
         <Text style={s.hint}>凭据保存在系统安全存储，不同步模型密钥。解除本机配对不会删除电脑数据。</Text>
         <Button label="解除本机配对" disabled={busy} onPress={() => automatic ? void disconnect() : Alert.alert('解除配对？', '清除此手机凭据。电脑中可另行撤销访问权限。', [{ text: '取消' }, { text: '解除', style: 'destructive', onPress: () => void disconnect() }])} /></View> : <View style={s.card}>
@@ -219,7 +244,7 @@ function Home() {
       <TextInput style={[s.input, { marginHorizontal: 24 }]} placeholder="搜索会话" value={query} onChangeText={setQuery} />
       <FlatList data={sessions.filter(item => item.title.includes(query))} keyExtractor={item => item.id} contentContainerStyle={s.page}
         ListEmptyComponent={<Text style={s.empty}>连接电脑后，你的会话会出现在这里</Text>}
-        renderItem={({ item }) => <Pressable style={s.card} disabled={busy} onPress={() => { setMessages([]); setSelected(item.id); setHistory(false); setTab('chat'); }}><Text style={s.cardText}>{item.title}</Text></Pressable>} />
+        renderItem={({ item }) => <Pressable style={s.card} disabled={busy} onPress={() => { selectSession(item.id); setHistory(false); }}><Text style={s.cardText}>{item.title}</Text></Pressable>} />
     </SafeAreaView></Modal>
   </SafeAreaView>;
 }
@@ -250,7 +275,8 @@ const s = StyleSheet.create({
   messageName: { color: '#7a9971', fontSize: 11, marginBottom: 10 }, messageText: { color: '#3b5237', fontSize: 14, lineHeight: 25 },
   composer: { marginHorizontal: 18, borderWidth: 1, borderColor: '#dfe7d8', backgroundColor: '#fff', borderRadius: 20, padding: 15 },
   prompt: { minHeight: 50, maxHeight: 140, fontSize: 13, lineHeight: 22, color: '#3b5237', textAlignVertical: 'top' },
-  composerBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 7 },
+  composerBar: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, alignItems: 'center', justifyContent: 'space-between', marginTop: 7 },
+  speechHint: { color: '#839577', fontSize: 10, lineHeight: 17, marginTop: 8 },
   mode: { color: '#729568', backgroundColor: '#f0f5e9', padding: 7, borderRadius: 8, fontSize: 11 },
   send: { height: 34, width: 34, borderRadius: 17, backgroundColor: '#46895f', alignItems: 'center', justifyContent: 'center' }, sendText: { color: 'white', fontSize: 24 },
   caption: { color: '#91a088', fontSize: 9, textAlign: 'center', padding: 11 },

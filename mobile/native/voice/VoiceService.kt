@@ -7,17 +7,12 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.media.*
 import android.os.*
-import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
 import org.json.JSONObject
 import org.vosk.Model
 import org.vosk.Recognizer
 import org.vosk.LibVosk
 import org.vosk.LogLevel
 import java.io.File
-import java.util.Locale
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 
 object VoiceState {
     val modelLock = Any()
@@ -26,6 +21,7 @@ object VoiceState {
     @Volatile var phase = "off"
     @Volatile var message = "语音未开启。"
     @Volatile var session: String? = null
+    @Volatile var micRecording = false
     fun snapshot(modelReady: Boolean) = JSONObject().put("available", modelReady).put("running", running)
         .put("phase", phase).put("message", if (modelReady) message else "安装包缺少离线中文模型，不能开启语音。")
         .put("session_id", session ?: JSONObject.NULL)
@@ -38,11 +34,7 @@ class VoiceService : Service() {
     @Volatile private var recorder: AudioRecord? = null
     private var worker: Thread? = null
     private var chat: VoiceChat? = null
-    private var tts: TextToSpeech? = null
     private var power: PowerManager.WakeLock? = null
-    private val ttsReady = CountDownLatch(1)
-    @Volatile private var canSpeak = false
-    @Volatile private var spoken: CountDownLatch? = null
     private val renewPower = object : Runnable {
         override fun run() {
             if (!stopped && VoiceState.running) {
@@ -97,18 +89,7 @@ class VoiceService : Service() {
             power = (getSystemService(POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Xiayuluo:Voice")
             power?.setReferenceCounted(false)
             renewPower.run()
-            tts = TextToSpeech(this) { status ->
-                if (!stopped && status == TextToSpeech.SUCCESS) {
-                    val localVoice = tts?.voices?.firstOrNull { it.locale.language == "zh" && !it.isNetworkConnectionRequired }
-                    canSpeak = localVoice != null && tts?.setVoice(localVoice) == TextToSpeech.SUCCESS
-                }
-                ttsReady.countDown()
-            }
-            tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(id: String?) {}
-                override fun onDone(id: String?) { spoken?.countDown() }
-                @Deprecated("TTS compatibility") override fun onError(id: String?) { canSpeak = false; spoken?.countDown() }
-            })
+            SpeechOutput.initialize(this)
             chat = VoiceChat(config) { stopped }
             worker = Thread({ listen() }, "xiayuluo-offline-voice").apply { start() }
         } catch (_: Exception) { fail() }
@@ -140,24 +121,14 @@ class VoiceService : Service() {
     }
     private fun speak(text: String) {
         if (stopped) return
-        check((getSystemService(AUDIO_SERVICE) as AudioManager).mode == AudioManager.MODE_NORMAL)
-        check(ttsReady.await(15, TimeUnit.SECONDS) && canSpeak) { "系统中文朗读语音不可用。" }
-        val latch = CountDownLatch(1); spoken = latch
         state("speaking", "正在回答，暂停识别以避免自唤醒。")
-        handler.post {
-            if (stopped || tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "reply") != TextToSpeech.SUCCESS) {
-                canSpeak = false; latch.countDown()
-            }
-        }
-        check(latch.await(180, TimeUnit.SECONDS) && canSpeak && !stopped)
-        spoken = null
+        SpeechOutput.speak(this, text, "voice")
     }
     private fun listen() {
         var model: Model? = null; var recognizer: Recognizer? = null
         try {
             LibVosk.setLogLevel(LogLevel.WARNINGS)
             val directory = prepareModel()
-            check(ttsReady.await(15, TimeUnit.SECONDS) && canSpeak) { "系统中文朗读语音不可用。" }
             model = Model(directory.absolutePath); recognizer = Recognizer(model, 16000f)
             check(!stopped)
             chat!!.begin()
@@ -172,8 +143,21 @@ class VoiceService : Service() {
             check(mic.state == AudioRecord.STATE_INITIALIZED)
             val gate = WakeGate(); val buffer = ShortArray(3200)
             mic.startRecording(); check(mic.recordingState == AudioRecord.RECORDSTATE_RECORDING)
+            VoiceState.micRecording = true
             state("listening", "正在本地监听“夏鱼洛”，前台/后台均由此服务运行。")
             while (!stopped) {
+                if (SpeechOutput.active) {
+                    mic.stop(); VoiceState.micRecording = false
+                    recognizer.reset()
+                    state("speaking", "正在朗读文字回复，暂停麦克风识别。")
+                    while (!stopped && SpeechOutput.active) Thread.sleep(25)
+                    if (stopped) break
+                    Thread.sleep(300)
+                    mic.startRecording(); check(mic.recordingState == AudioRecord.RECORDSTATE_RECORDING)
+                    VoiceState.micRecording = true
+                    state("listening", "朗读结束，恢复本地唤醒监听。")
+                    continue
+                }
                 check(!(getSystemService(AUDIO_SERVICE) as AudioManager).isMicrophoneMute) { "系统已关闭麦克风。" }
                 check((getSystemService(AUDIO_SERVICE) as AudioManager).mode == AudioManager.MODE_NORMAL) { "麦克风正被通话使用。" }
                 val count = mic.read(buffer, 0, buffer.size)
@@ -181,7 +165,7 @@ class VoiceService : Service() {
                 if (!recognizer.acceptWaveForm(buffer, count)) continue
                 val (action, prompt) = gate.feed(JSONObject(recognizer.result).optString("text"))
                 if (action == "ignore") continue
-                mic.stop()
+                mic.stop(); VoiceState.micRecording = false
                 if (action == "stop") { handler.post { stopSelf() }; break }
                 val reply = when (action) {
                     "sleep" -> "好的，等你再次呼唤夏鱼洛。"
@@ -197,11 +181,13 @@ class VoiceService : Service() {
                 if (!stopped) {
                     Thread.sleep(300) // Avoid the tail of our own audio.
                     mic.startRecording(); check(mic.recordingState == AudioRecord.RECORDSTATE_RECORDING)
+                    VoiceState.micRecording = true
                     state("listening", "正在本地监听；唤醒后 30 秒内可接着说。")
                 }
             }
         } catch (_: Exception) { if (!stopped) handler.post { fail() } }
         finally {
+            VoiceState.micRecording = false
             try { recorder?.release() } catch (_: Exception) {}
             recorder = null; recognizer?.close(); model?.close()
             if (stopped) try { chat?.revoke() } catch (_: Exception) {}
@@ -216,11 +202,11 @@ class VoiceService : Service() {
     override fun onDestroy() {
         stopped = true; VoiceState.running = false; VoiceState.connection = null
         handler.removeCallbacks(renewPower); handler.removeCallbacks(heartbeat)
-        chat?.cancel(); spoken?.countDown(); ttsReady.countDown()
+        chat?.cancel(); SpeechOutput.stop("voice")
         Thread({ try { chat?.revoke() } catch (_: Exception) { /* Lease expires within 150s without heartbeat. */ } }, "xiayuluo-voice-revoke").start()
         try { recorder?.stop() } catch (_: Exception) {}
         worker?.interrupt()
-        tts?.stop(); tts?.shutdown()
+        VoiceState.micRecording = false
         if (power?.isHeld == true) power?.release()
         if (VoiceState.phase != "error") { VoiceState.phase = "off"; VoiceState.message = "语音已停止，没有自动重启。" }
         stopForeground(STOP_FOREGROUND_REMOVE)

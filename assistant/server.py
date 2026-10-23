@@ -79,6 +79,16 @@ class MouseControlRequest(Payload):
     enabled: bool = Field(strict=True)
 
 
+class SpeechRequest(Payload):
+    enabled: bool = Field(strict=True)
+    voice_id: str | None = Field(default=None, max_length=2000)
+
+
+class SpeakRequest(Payload):
+    text: str = Field(min_length=1, max_length=100000)
+    generation: int = Field(strict=True, ge=0)
+
+
 def sse(event):
     return "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
 
@@ -129,6 +139,7 @@ def create_app(settings=None, *, memory=None, transport=None):
     app.state.install_local_update = None
     app.state.updating = False
     app.state.voice = None
+    app.state.speech = None  # Only the owned native window initializes local TTS.
     voice_consents = VoiceConsents(memory)
     app.state.voice_consents = voice_consents
     updater = Updates(Path(settings.data_dir) / "updates")
@@ -238,6 +249,60 @@ def create_app(settings=None, *, memory=None, transport=None):
     def voice_owner(request):
         return request.headers.get("x-xiayuluo-voice-device", "desktop")
 
+    def local_speech(request):
+        if voice_owner(request).startswith("phone:"):
+            raise HTTPException(403, "手机使用本机朗读，不能远程让电脑扬声器播放或修改电脑声音。")
+        if app.state.speech is None:
+            raise HTTPException(409, "请在 Windows 桌面 App 使用系统中文朗读；浏览器或云服务不启动电脑声音。")
+        return app.state.speech
+
+    @app.get("/api/speech", dependencies=auth)
+    async def speech_status(request: Request):
+        if voice_owner(request).startswith("phone:"):
+            raise HTTPException(403, "手机不能读取电脑本机声音配置。")
+        if app.state.speech is None:
+            return {"available": False, "enabled": False, "speaking": False,
+                    "generation": 0, "phase": "unavailable", "engine": "system",
+                    "voice_id": None, "voices": [], "truncated": False,
+                    "message": "仅原生 Windows App 提供电脑系统朗读。",
+                    "reason": "文字朗读无需麦克风；请使用含语音依赖的 Windows 安装版。"}
+        return app.state.speech.status()
+
+    @app.post("/api/speech", dependencies=auth)
+    async def configure_speech(body: SpeechRequest, request: Request):
+        speech = local_speech(request)
+        if app.state.updating and body.enabled:
+            raise HTTPException(409, "更新期间不能开启朗读。")
+        try:
+            await asyncio.to_thread(speech.configure, body.enabled, body.voice_id)
+            return speech.status()
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
+        except Exception as error:
+            raise HTTPException(409, "无法保存朗读配置，文字聊天仍可继续。") from error
+
+    @app.post("/api/speech/stop", dependencies=auth)
+    async def stop_speech(request: Request):
+        speech = local_speech(request)
+        try:
+            await asyncio.to_thread(speech.stop)
+            return speech.status()
+        except Exception as error:
+            raise HTTPException(409, "停止朗读未确认，请关闭 App 或检查系统声音；文字聊天仍可继续。") from error
+
+    @app.post("/api/speech/speak", dependencies=auth)
+    async def speak_reply(body: SpeakRequest, request: Request):
+        speech = local_speech(request)
+        if app.state.updating:
+            raise HTTPException(409, "更新期间不能开始朗读。")
+        try:
+            await asyncio.to_thread(speech.say, body.text, source="chat", expected_generation=body.generation)
+            return speech.status()
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
+        except Exception as error:
+            raise HTTPException(409, "系统朗读未能开始，文字回复不受影响，请检查本机中文声音。") from error
+
     @app.post("/api/voice/sessions", dependencies=auth)
     async def voice_consent(body: VoiceRequest, request: Request):
         if not body.confirm:
@@ -316,7 +381,7 @@ def create_app(settings=None, *, memory=None, transport=None):
             return {**result, "install_supported": app.state.install_update is not None}
         except httpx.HTTPStatusError as error:
             if error.response.status_code == 404:
-                raise HTTPException(409, "更新源尚未发布或仓库需要登录；请点击“下载更新”前往 GitHub。") from error
+                raise HTTPException(409, "签名更新源尚未发布或当前不可访问，无法在应用内下载更新。请待发布源就绪后重试；当前版本保留，也可导入本地签名包。") from error
             raise HTTPException(502, "暂时无法访问更新发布源，请稍后重试。") from error
         except httpx.HTTPError as error:
             raise HTTPException(502, "更新检查网络失败，请稍后重试；当前版本不受影响。") from error

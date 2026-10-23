@@ -183,4 +183,3 @@ body:not(.developer-mode) .memory-levels { grid-template-columns: 1fr 1fr; gap: 
 body:not(.developer-mode) .level-card { padding: 14px 10px; }
 body:not(.developer-mode) .preference-card { padding: 17px; }
 }
-.download-update-link { display: inline-flex; align-items: center; text-decoration: none; }

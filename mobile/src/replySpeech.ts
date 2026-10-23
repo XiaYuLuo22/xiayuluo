@@ -1,0 +1,158 @@
+/** Local playback only. No networking, microphone permission, or history observer. */
+export type SpeechStatus = { available: boolean; enabled: boolean; speaking: boolean; message: string;
+  provider: 'system'; voice_id: string | null; owner?: 'chat' | 'voice' | null };
+export type SpeechNative = { speechStatus(): Promise<string>; configureSpeech(enabled: boolean): Promise<string>;
+  speakReply(text: string): Promise<boolean>; stopSpeech(): Promise<void> };
+export type SpeechView = { known: boolean; changing: boolean; pending: boolean; error: string; status: SpeechStatus };
+
+const empty: SpeechStatus = { available: false, enabled: false, speaking: false, message: '正在读取本机朗读状态…',
+  provider: 'system', voice_id: null, owner: null };
+
+export function parseSpeechStatus(raw: string): SpeechStatus {
+  const value: unknown = JSON.parse(raw);
+  if (!value || typeof value !== 'object') throw new Error('朗读状态无效。');
+  const data = value as Record<string, unknown>;
+  if (typeof data.available !== 'boolean' || typeof data.enabled !== 'boolean' || typeof data.speaking !== 'boolean' ||
+      typeof data.message !== 'string' || data.provider !== 'system' ||
+      !(data.voice_id === null || typeof data.voice_id === 'string') ||
+      !(data.owner === undefined || data.owner === null || data.owner === 'chat' || data.owner === 'voice')) {
+    throw new Error('朗读状态无效，请更新 App 后重试。');
+  }
+  return { available: data.available, enabled: data.enabled, speaking: data.speaking, message: data.message,
+    provider: 'system', voice_id: data.voice_id, owner: data.owner } as SpeechStatus;
+}
+
+/** Read prose, not code blocks or remote addresses. Never alters the displayed reply. */
+export function spokenReply(text: string): string {
+  const prose = text.replace(/```[\s\S]*?(?:```|$)/g, '（代码请查看文字）')
+    .replace(/~~~[\s\S]*?(?:~~~|$)/g, '（代码请查看文字）')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/https?:\/\/[^\s<>]+/gi, '（链接请查看文字）')
+    .replace(/^\s{0,3}(?:#{1,6}\s+|>\s*|[-*+]\s+)/gm, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1').replace(/__([^_]+)__/g, '$1')
+    .replace(/`([^`]+)`/g, '$1').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '')
+    .replace(/\n{3,}/g, '\n\n').trim();
+  return prose.length > 8000 ? prose.slice(0, 7940) + '。回复较长，其余内容请查看文字。' : prose;
+}
+
+/** An epoch belongs to one newly submitted request; stop/off/on can never replay it. */
+export class ReplySpeech {
+  private native: SpeechNative | undefined;
+  private changed: (view: SpeechView) => void;
+  private view: SpeechView = { known: false, changing: false, pending: false, error: '', status: { ...empty } };
+  private epoch = 0;
+  private readVersion = 0;
+  private delivered = -1;
+  private active = false;
+  private alive = true;
+  private blocked = -1;
+
+  constructor(native: SpeechNative | undefined, changed: (view: SpeechView) => void = () => {}) {
+    this.native = native; this.changed = changed;
+    if (!native) this.view = { ...this.view, status: { ...empty,
+      message: '需要包含新版原生朗读模块的安卓 App；Expo Go / iOS / 网页暂不支持。' } };
+  }
+
+  snapshot(): SpeechView { return { ...this.view, status: { ...this.view.status } }; }
+  attach() {
+    // React development lifecycle may set up the same effect again after its
+    // cleanup. Old native completions remain invalid because dispose advanced epoch.
+    this.alive = true;
+  }
+  private publish(patch: Partial<SpeechView>) {
+    this.view = { ...this.view, ...patch };
+    if (this.alive) this.changed(this.snapshot());
+  }
+  private error(cause: unknown): string { return cause instanceof Error ? cause.message : '请检查系统本地中文声音。'; }
+
+  async refresh() {
+    if (!this.native || !this.alive) return;
+    const version = ++this.readVersion, epoch = this.epoch;
+    try {
+      const status = parseSpeechStatus(await this.native.speechStatus());
+      if (this.alive && epoch === this.epoch && version === this.readVersion && !this.view.changing)
+        this.publish({ status, known: true });
+    } catch (cause) {
+      if (this.alive && epoch === this.epoch && version === this.readVersion)
+        this.publish({ known: false, error: '无法读取朗读状态：' + this.error(cause) });
+    }
+  }
+
+  async setActive(active: boolean) {
+    if (this.active === active) return;
+    this.active = active;
+    if (active) await this.refresh();
+    else await this.stop();
+  }
+
+  private async stopAt(epoch: number) {
+    if (!this.native) return;
+    try {
+      await this.native.stopSpeech();
+      if (epoch === this.epoch && this.alive) {
+        this.publish({ pending: false });
+        await this.refresh();
+      }
+    } catch (cause) {
+      if (epoch === this.epoch && this.alive) {
+        this.blocked = epoch;
+        this.publish({ known: false, error: '停止朗读失败：' + this.error(cause) });
+      }
+    }
+  }
+
+  async stop() {
+    const epoch = ++this.epoch; ++this.readVersion;
+    await this.stopAt(epoch);
+  }
+
+  async beginTurn(): Promise<number> {
+    const epoch = ++this.epoch; ++this.readVersion;
+    await this.stopAt(epoch);
+    return epoch;
+  }
+
+  async configure(enabled: boolean) {
+    if (!this.native || !this.alive || this.view.changing) return;
+    const epoch = ++this.epoch; ++this.readVersion;
+    this.publish({ changing: true, error: '' });
+    try {
+      const status = parseSpeechStatus(await this.native.configureSpeech(enabled));
+      if (this.alive && epoch === this.epoch) this.publish({ status, known: true, pending: false });
+    } catch (cause) {
+      if (this.alive && epoch === this.epoch) this.publish({ known: false, error: '朗读设置失败：' + this.error(cause) });
+    } finally {
+      if (this.alive) this.publish({ changing: false });
+      await this.refresh(); // A failed setting is never displayed as accepted consent.
+    }
+  }
+
+  async completeTurn(epoch: number, text: string, options: { mode: 'chat' | 'codex'; complete: boolean;
+    pending: boolean; aborted: boolean }): Promise<boolean> {
+    if (epoch !== this.epoch || this.delivered === epoch) return false;
+    this.delivered = epoch;
+    const prose = spokenReply(text);
+    if (!this.native || !this.alive || !this.active || !this.view.known || this.view.changing ||
+        !this.view.status.available || !this.view.status.enabled || this.blocked === epoch ||
+        options.mode !== 'chat' || !options.complete || options.pending || options.aborted || !prose) return false;
+    this.publish({ pending: true, error: '' });
+    try {
+      const done = await this.native.speakReply(prose);
+      return epoch === this.epoch && this.alive && done;
+    } catch (cause) {
+      if (epoch === this.epoch && this.alive) this.publish({ error: '文字已回复，朗读失败：' + this.error(cause) });
+      return false;
+    } finally {
+      if (epoch === this.epoch && this.alive) {
+        this.publish({ pending: false }); await this.refresh();
+      }
+    }
+  }
+
+  dispose() {
+    this.alive = false; this.active = false; ++this.epoch; ++this.readVersion;
+    // Only chat playback is stopped; the native voice service owns its lifecycle.
+    void this.native?.stopSpeech().catch(() => {});
+  }
+}

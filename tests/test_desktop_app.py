@@ -65,9 +65,12 @@ def test_owned_service_readiness_bootstrap_and_port_release(tmp_path):
             assert bootstrap['status']['runtime']['config_file'] == str(config)
             client.headers['X-Assistant-Token'] = bootstrap['token']
             assert client.post('/api/sessions').status_code == 200
+        assert service.app.state.speech is service.app.state.voice.speech
+        assert service.app.state.speech.status()['engine'] == 'system'
     finally:
         service.stop()
     assert not service.thread.is_alive()
+    assert not service.app.state.speech.status()['available']
     assert (tmp_path / 'memory/memory.sqlite3').is_file()
     service.stop()  # Idempotent close event plus finally cleanup.
     with socket.socket() as probe:

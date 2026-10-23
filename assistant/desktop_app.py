@@ -19,6 +19,7 @@ import uvicorn
 from .config import Settings
 from .server import create_app
 from .single_instance import SingleInstance
+from .speech import NativeSpeech
 
 
 def configuration_directory():
@@ -66,6 +67,7 @@ class LocalService:
         self.app = app_factory(settings)
         self.app.state.presentation = "desktop"
         self.app.state.config_file = str(config_file) if config_file else ""
+        self.speech_data_dir = settings.data_dir
         self.listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.listener.bind(("127.0.0.1", settings.port if settings.mobile_enabled else 0))
         self.port = self.listener.getsockname()[1]
@@ -99,7 +101,9 @@ class LocalService:
                             from .voice import DesktopVoice
                             # Owned loopback service only; never write its token to disk/logs.
                             bootstrap = client.get(self.url + "/api/bootstrap").json()
-                            self.app.state.voice = DesktopVoice(self.url, bootstrap["token"], autostart=self.voice_autostart)
+                            self.app.state.speech = NativeSpeech(self.speech_data_dir)
+                            self.app.state.voice = DesktopVoice(self.url, bootstrap["token"], autostart=self.voice_autostart,
+                                                                speech=self.app.state.speech)
                             return self
                     except httpx.HTTPError:
                         pass
@@ -118,6 +122,9 @@ class LocalService:
                 return
             if self.app.state.voice:
                 self.app.state.voice.stop()
+            speech = getattr(self.app.state, 'speech', None)
+            if speech is not None:
+                speech.close()
             self.app.state.voice_consents.revoke_owner("desktop")
             self.server.should_exit = True
             if self.thread.is_alive():

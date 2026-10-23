@@ -5,6 +5,12 @@ const path = require('node:path');
 module.exports = function withVoice(config) {
   config = withAndroidManifest(config, mod => {
     const manifest = mod.modResults.manifest;
+    // Android 11+ package visibility: discover only TTS services, not all apps.
+    manifest.queries ||= [];
+    if (!manifest.queries.some(query => query.intent?.some(intent => intent.action?.some(
+      action => action.$?.['android:name'] === 'android.intent.action.TTS_SERVICE')))) {
+      manifest.queries.push({ intent: [{ action: [{ $: { 'android:name': 'android.intent.action.TTS_SERVICE' } }] }] });
+    }
     manifest['uses-permission'] ||= [];
     for (const name of ['RECORD_AUDIO', 'FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_MICROPHONE', 'POST_NOTIFICATIONS', 'WAKE_LOCK']) {
       const permission = `android.permission.${name}`;
