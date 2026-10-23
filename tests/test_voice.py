@@ -1,4 +1,5 @@
 import json
+from importlib.machinery import ModuleSpec
 from pathlib import Path
 import sys
 import zipfile
@@ -139,10 +140,13 @@ def test_running_voice_uses_no_wake_gate_and_revokes_when_ended(monkeypatch):
             calls.append((method, url, json))
             return httpx.Response(200, json={'session_id': 'a' * 32, 'voice_token': 'fixture-lease'})
 
-    monkeypatch.setitem(sys.modules, 'sounddevice', SimpleNamespace(RawInputStream=Stream))
-    monkeypatch.setitem(sys.modules, 'vosk', SimpleNamespace(SetLogLevel=lambda _: None, Model=lambda _: object(), KaldiRecognizer=Recognizer))
+    monkeypatch.setitem(sys.modules, 'sounddevice', SimpleNamespace(
+        __spec__=ModuleSpec('sounddevice', loader=None), RawInputStream=Stream))
+    monkeypatch.setitem(sys.modules, 'vosk', SimpleNamespace(
+        __spec__=ModuleSpec('vosk', loader=None), SetLogLevel=lambda _: None,
+        Model=lambda _: object(), KaldiRecognizer=Recognizer))
     monkeypatch.setattr('assistant.voice.httpx.Client', Client)
-    voice = DesktopVoice('http://127.0.0.1:12345', 'fixture')
+    voice = DesktopVoice('http://127.0.0.1:12345', 'fixture', platform='win32')
     voice._chat = lambda client, prompt: replies.append(prompt) or '星期五'
     voice._speak = lambda text: calls.append(('speak', text))
     voice._run()
