@@ -4,12 +4,19 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import shutil
 import subprocess
 import sys
 import zipfile
 import xml.etree.ElementTree as ET
+
+
+ANDROID_PACKAGE = "com.xiayuluo.assistant"
+# Public certificate identity used by all existing private-test installations.
+# Never replace this fingerprint to accommodate a different CI signing key.
+ANDROID_CERTIFICATE_SHA256 = "bef9a3315531035f91362a72fd3012198304fd83d21d07009d67fd1df90ac96a"
 
 
 def signing(directory, keytool):
@@ -96,6 +103,52 @@ def validate_bundle(apk):
             raise ValueError("Offline Chinese voice model missing; do not distribute a nonfunctional voice build.")
 
 
+def validate_signed_apk(apk, build_tools, *, expected_version, expected_code, environment=None):
+    """Fail closed on a different signing identity or compiled release metadata.
+
+    Verification reads only the APK's public certificate and manifest. It does
+    not open a keystore or require its password. SDK 36 and 37 print different
+    signer labels, both of which identify the same pinned certificate.
+    """
+    if not isinstance(expected_version, str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", expected_version):
+        raise ValueError("Expected Android version is invalid.")
+    if type(expected_code) is not int or not 1 <= expected_code <= 2100000000:
+        raise ValueError("Expected Android versionCode is invalid.")
+    build_tools = Path(build_tools)
+    # These values are needed for Gradle signing, not public APK verification.
+    tool_environment = None if environment is None else {
+        name: value for name, value in environment.items()
+        if name not in {"XIAYULUO_ANDROID_STORE_PASSWORD", "XIAYULUO_ANDROID_KEYSTORE"}
+    }
+    options = {"env": tool_environment, "check": True, "capture_output": True,
+               "text": True, "encoding": "utf-8", "errors": "replace"}
+    signature = subprocess.run([str(build_tools / "apksigner"), "verify", "--verbose", "--print-certs", str(apk)],
+                               **options).stdout
+    counts = re.findall(r"^Number of signers:\s*([0-9]+)\s*$", signature, re.MULTILINE)
+    certificates = re.findall(r"^(?:Signer #[0-9]+|V[0-9.]+ Signer):? certificate SHA-256 digest:\s*([0-9a-fA-F]{64})\s*$",
+                              signature, re.MULTILINE)
+    if (counts != ["1"] or not certificates
+            or {value.lower() for value in certificates} != {ANDROID_CERTIFICATE_SHA256}
+            or not re.search(r"^Verified using v2 scheme \(APK Signature Scheme v2\): true\s*$", signature, re.MULTILINE)):
+        raise ValueError("APK signing identity does not match existing installations; refusing release.")
+    badging = subprocess.run([str(build_tools / "aapt"), "dump", "badging", str(apk)], **options).stdout
+    packages = re.findall(r"^package: (.+)$", badging, re.MULTILINE)
+    if len(packages) != 1:
+        raise ValueError("APK package metadata is missing or ambiguous.")
+    attributes = re.findall(r"([A-Za-z][A-Za-z0-9]*)='([^']*)'", packages[0])
+    package = dict(attributes)
+    if (len(attributes) != len(package) or package.get("name") != ANDROID_PACKAGE
+            or package.get("versionName") != expected_version or package.get("versionCode") != str(expected_code)):
+        raise ValueError("APK package/version does not match the intended release.")
+    if re.findall(r"^sdkVersion:'([0-9]+)'\s*$", badging, re.MULTILINE) != ["24"]:
+        raise ValueError("APK minimum Android SDK must remain 24.")
+    architectures = re.findall(r"^native-code:\s*(.+)$", badging, re.MULTILINE)
+    if len(architectures) != 1 or architectures[0].strip() != "'arm64-v8a'":
+        raise ValueError("APK must contain only the arm64-v8a architecture.")
+    return {"package": ANDROID_PACKAGE, "version": expected_version, "version_code": expected_code,
+            "minimum_sdk": 24, "architectures": ["arm64-v8a"], "certificate_sha256": ANDROID_CERTIFICATE_SHA256}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sdk", required=True, type=Path)
@@ -134,8 +187,9 @@ def main(argv=None):
         "-Dorg.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m", *toolchain_args],
         cwd=mobile / "android", env=environment, check=True)
     apk = mobile / "android/app/build/outputs/apk/release/app-release.apk"
-    subprocess.run([str(build_tools / "apksigner"), "verify", "--verbose", "--print-certs", str(apk)],
-                   env=environment, check=True)
+    app = json.loads((mobile / "app.json").read_text(encoding="utf-8"))["expo"]
+    validate_signed_apk(apk, build_tools, expected_version=app["version"],
+                        expected_code=app["android"]["versionCode"], environment=environment)
     validate_bundle(apk)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with apk.open("rb") as source, args.output.open("xb") as destination:

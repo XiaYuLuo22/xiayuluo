@@ -16,7 +16,22 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require a version tag and the existing signing secrets
+        env:
+          XIAYULUO_RELEASE_PRIVATE_KEY: ${{ secrets.XIAYULUO_RELEASE_PRIVATE_KEY }}
+          XIAYULUO_ANDROID_KEYSTORE_BASE64: ${{ secrets.XIAYULUO_ANDROID_KEYSTORE_BASE64 }}
+          XIAYULUO_ANDROID_STORE_PASSWORD: ${{ secrets.XIAYULUO_ANDROID_STORE_PASSWORD }}
+        run: |
+          [[ "$GITHUB_REF" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          python3 tools/check_release_secrets.py
+
   windows:
+    needs: preflight
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -31,7 +46,7 @@ jobs:
       - run: python -m pip install -c requirements.lock -e ".[app,desktop,voice,build,test]"
       - run: python tools/release.py check-version ($env:GITHUB_REF_NAME.Substring(1))
         shell: pwsh
-      - run: python -m pytest -q tests/test_updates.py tests/test_offline_updates.py tests/test_update_ownership.py tests/test_packaged_smoke.py tests/test_desktop_app.py tests/test_single_instance.py tests/test_mouse.py tests/test_mouse_api.py tests/test_proactive.py tests/test_proactive_api.py tests/test_mobile.py tests/test_codex_chat.py tests/test_voice.py tests/test_speech.py tests/test_speech_api.py tests/test_voice_consent.py tests/test_automation.py
+      - run: python -m pytest -q tests/test_updates.py tests/test_offline_updates.py tests/test_update_ownership.py tests/test_packaged_smoke.py tests/test_desktop_app.py tests/test_single_instance.py tests/test_mouse.py tests/test_mouse_api.py tests/test_proactive.py tests/test_proactive_api.py tests/test_mobile.py tests/test_codex_chat.py tests/test_voice.py tests/test_speech.py tests/test_speech_api.py tests/test_voice_consent.py tests/test_automation.py tests/test_release_checks.py tests/test_release_android.py
       - run: python tools/prepare_voice_model.py
       - run: python tools/run_ci_command.py python tools/build_desktop.py --installer
       - uses: actions/upload-artifact@v4
@@ -43,6 +58,7 @@ jobs:
           if-no-files-found: error
 
   android:
+    needs: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
