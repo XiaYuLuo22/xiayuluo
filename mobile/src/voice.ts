@@ -98,7 +98,7 @@ export function useVoice(connection: Connection | null, ready: boolean, online: 
     if (alive.current) { setError('本次已停止监听，不会因切换页面或返回前台自动重启；可手动开启。'); await refresh(); }
   }
   async function powerSettings() { if (native && supported) await native.openPowerSettings(); }
-  const message = error || (ready && !connection ? '请先配对电脑；本次打开会在配对并在线后自动尝试语音待命。' : status.message);
+  const message = error || (ready && !connection ? '请先配对电脑；本次打开会在配对并在线后自动尝试免唤醒语音对话。' : status.message);
   return { status: { ...status, message }, busy, supported, canStart: supported && !!connection && status.available,
     start: () => start(false), stop, powerSettings };
 }

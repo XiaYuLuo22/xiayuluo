@@ -25,6 +25,7 @@ from .memory import MemoryStore
 from .mobile_gateway import MobileAccess
 from .model import SYSTEM_PROMPT, chat_events
 from .mouse import MouseControl, MousePlanner, MouseTool
+from .proactive import ProactiveAssistant
 from .tools import CodexChat, PendingActions, build_registry
 
 
@@ -79,6 +80,11 @@ class MouseControlRequest(Payload):
     enabled: bool = Field(strict=True)
 
 
+class ProactiveRequest(Payload):
+    enabled: bool = Field(strict=True)
+    provider: str | None = Field(default=None, pattern="^(auto|api|codex)$")
+
+
 class SpeechRequest(Payload):
     enabled: bool = Field(strict=True)
     voice_id: str | None = Field(default=None, max_length=2000)
@@ -115,11 +121,15 @@ def create_app(settings=None, *, memory=None, transport=None):
 
     @asynccontextmanager
     async def lifespan(app):
-        yield
-        await asyncio.to_thread(mouse.set_enabled, False)
-        memory.close()
-        if devices:
-            devices.close()
+        await app.state.proactive.start()
+        try:
+            yield
+        finally:
+            await app.state.proactive.close()
+            await asyncio.to_thread(mouse.set_enabled, False)
+            memory.close()
+            if devices:
+                devices.close()
 
     app = FastAPI(title="夏鱼洛 · 本地助手", lifespan=lifespan)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "[::1]"])
@@ -140,6 +150,35 @@ def create_app(settings=None, *, memory=None, transport=None):
     app.state.updating = False
     app.state.voice = None
     app.state.speech = None  # Only the owned native window initializes local TTS.
+    app.state.native_window_open = False
+    app.state.greeting_claimed = False
+    app.state.greeting_wait_started = None
+
+    def observation_available():
+        if not app.state.native_window_open:
+            return False, "请在 Windows 桌面 App 开启主动关怀；浏览器、云端和手机不能观察电脑。"
+        ready, reason = proactive.screen.available()
+        if not ready:
+            return ready, reason
+        return desktop.available()
+
+    def observation_eligible():
+        speech = app.state.speech
+        voice = app.state.voice
+        return (app.state.native_window_open and not active_sessions and not app.state.updating
+                and not codex.lock.locked()
+                and not (speech and speech.status().get("speaking"))
+                and not (voice and voice.status().get("phase") in {"thinking", "speaking"}))
+
+    def observation_provider():
+        preference = app.state.observation_provider
+        return ("api" if settings.api_key else "codex") if preference == "auto" else preference
+
+    app.state.observation_provider = settings.chat_provider
+    proactive = ProactiveAssistant(settings, available=observation_available,
+                                   eligible=observation_eligible, provider=observation_provider, transport=transport)
+    proactive.planner.lock = codex.lock
+    app.state.proactive = proactive
     voice_consents = VoiceConsents(memory)
     app.state.voice_consents = voice_consents
     updater = Updates(Path(settings.data_dir) / "updates")
@@ -170,13 +209,19 @@ def create_app(settings=None, *, memory=None, transport=None):
         if not memory.has_session(session_id):
             raise HTTPException(404, "对话不存在")
 
-    def reserve(session_id):
+    async def reserve(session_id):
         if app.state.updating:
             raise HTTPException(409, "正在更新，请等待重启完成。")
         require_session(session_id)
         if session_id in active_sessions:
             raise HTTPException(409, "此对话仍在处理请求，请先停止或等待完成。")
         active_sessions.add(session_id)
+        app.state.greeting_claimed = True
+        try:
+            await proactive.interrupt_and_wait()
+        except BaseException:
+            active_sessions.discard(session_id)
+            raise
 
     def release_mouse_snapshot(item):
         if item.get("tool") == "desktop_mouse":
@@ -208,7 +253,7 @@ def create_app(settings=None, *, memory=None, transport=None):
                           "reason": dialogue_reason if provider == "codex" else "配置存在不等于连接已通过。",
                           "confirmation_required": provider == "codex" and not automation.automatic},
                 "desktop": {"available": desktop.available()[0], "reason": desktop.available()[1], "scope": "主屏幕"},
-                "mouse_control": mouse.status(),
+                "mouse_control": mouse.status(), "proactive": proactive.status(),
                 "codex": {"available": codex.available()[0], "reason": codex.available()[1],
                           "workspace": settings.codex_workspace, "sandbox": settings.codex_sandbox},
                 "memory": memory.stats(session_id), "plugins": registry.catalog(), "automation": automation.status(),
@@ -229,7 +274,7 @@ def create_app(settings=None, *, memory=None, transport=None):
     @app.post("/api/voice/start", dependencies=auth)
     async def start_voice(body: VoiceRequest):
         if not body.confirm:
-            raise HTTPException(400, "请先确认麦克风监听与唤醒后发送文字。")
+            raise HTTPException(400, "请先确认开启麦克风后，完整识别文字将直接发送用于只读问答，无需唤醒词。")
         if app.state.updating:
             raise HTTPException(409, "更新期间不能开启语音。")
         if not app.state.voice:
@@ -248,6 +293,72 @@ def create_app(settings=None, *, memory=None, transport=None):
 
     def voice_owner(request):
         return request.headers.get("x-xiayuluo-voice-device", "desktop")
+
+    def local_attention(request):
+        if voice_owner(request).startswith("phone:"):
+            raise HTTPException(403, "主动关怀仅在电脑本机设置，手机不能开启或读取电脑观察。")
+
+    @app.get("/api/proactive", dependencies=auth)
+    async def proactive_status(request: Request):
+        local_attention(request)
+        return {**proactive.status(), "provider": observation_provider(),
+                "preference": app.state.observation_provider}
+
+    @app.post("/api/proactive", dependencies=auth)
+    async def configure_proactive(body: ProactiveRequest, request: Request):
+        local_attention(request)
+        if body.enabled and app.state.updating:
+            raise HTTPException(409, "更新期间不能开启主动关怀。")
+        try:
+            # Validate the grant before changing the chosen data destination.
+            result = proactive.set_enabled(body.enabled)
+            if not body.enabled:
+                await proactive.interrupt_and_wait()
+                result = proactive.status()
+            if body.provider is not None and body.provider != app.state.observation_provider:
+                await proactive.interrupt_and_wait()
+                app.state.observation_provider = body.provider
+                result = proactive.status()
+            return {**result, "provider": observation_provider(), "preference": app.state.observation_provider}
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
+
+    @app.get("/api/proactive/events", dependencies=auth)
+    async def proactive_events(request: Request, after: int = 0):
+        local_attention(request)
+        if after < 0:
+            raise HTTPException(422, "消息序号不能为负数。")
+        return {"events": proactive.events(after), "cursor": proactive.status()["cursor"]}
+
+    @app.post("/api/greeting", dependencies=auth)
+    async def startup_greeting(request: Request):
+        local_attention(request)
+        if app.state.greeting_claimed:
+            return {"greeting": None, "pending": False}
+        if not app.state.native_window_open:
+            return {"greeting": None, "pending": app.state.presentation == "desktop"}
+        speech = app.state.speech
+        if speech is not None:
+            state = speech.status()
+            if state.get("enabled") and state.get("phase") == "starting":
+                if app.state.greeting_wait_started is None:
+                    app.state.greeting_wait_started = time.monotonic()
+                if time.monotonic() - app.state.greeting_wait_started < 5:
+                    return {"greeting": None, "pending": True}
+        # A delayed renderer must not interrupt a question already being answered.
+        app.state.greeting_claimed = True
+        if active_sessions or app.state.updating:
+            return {"greeting": None, "pending": False}
+        greeting = {"id": "startup", "message": "你好，我是夏鱼洛。很高兴见到你，今天想聊什么？"}
+        if speech is not None:
+            state = speech.status()
+            if state.get("enabled") and state.get("available") and not state.get("speaking"):
+                try:
+                    await asyncio.to_thread(speech.say, greeting["message"], source="greeting",
+                                            expected_generation=state["generation"])
+                except Exception:
+                    pass  # Greeting text remains usable when local audio is unavailable.
+        return {"greeting": greeting, "pending": False}
 
     def local_speech(request):
         if voice_owner(request).startswith("phone:"):
@@ -404,6 +515,7 @@ def create_app(settings=None, *, memory=None, transport=None):
         if active_sessions or app.state.updating:
             raise HTTPException(409, "请先完成或停止所有聊天、Codex 和更新任务。")
         app.state.updating = True
+        await proactive.interrupt_and_wait()
         try:
             await asyncio.to_thread(app.state.install_update, updater)
             return {"restarting": True}
@@ -418,6 +530,7 @@ def create_app(settings=None, *, memory=None, transport=None):
         if active_sessions or app.state.updating:
             raise HTTPException(409, "请先完成或停止所有聊天、Codex 和更新任务。")
         app.state.updating = True
+        await proactive.interrupt_and_wait()
         try:
             restarting = await asyncio.to_thread(app.state.install_local_update, updater)
             if not restarting:
@@ -579,7 +692,7 @@ def create_app(settings=None, *, memory=None, transport=None):
         except ValueError as error:
             raise HTTPException(409, str(error)) from error
         session_id = item["session_id"]
-        reserve(session_id)
+        await reserve(session_id)
         actions.take(action_id)
 
         async def run():
@@ -659,7 +772,7 @@ def create_app(settings=None, *, memory=None, transport=None):
             snapshot = desktop.snapshots.get(body.screenshot_id)
             if not snapshot or time.monotonic() - snapshot["created"] > 120:
                 raise HTTPException(409, "截图已失效，请刷新截图。")
-        reserve(body.session_id)
+        await reserve(body.session_id)
         automatic = automation.automatic
         mouse_requested = body.mouse_control and mouse.is_request(body.message)
         memory.append(body.session_id, "user", body.message)

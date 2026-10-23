@@ -1,6 +1,6 @@
 /** Local playback only. No networking, microphone permission, or history observer. */
 export type SpeechStatus = { available: boolean; enabled: boolean; speaking: boolean; message: string;
-  provider: 'system'; voice_id: string | null; owner?: 'chat' | 'voice' | null };
+  provider: 'system'; voice_id: string | null; owner?: 'chat' | 'voice' | null; ready?: boolean };
 export type SpeechNative = { speechStatus(): Promise<string>; configureSpeech(enabled: boolean): Promise<string>;
   speakReply(text: string): Promise<boolean>; stopSpeech(): Promise<void> };
 export type SpeechView = { known: boolean; changing: boolean; pending: boolean; error: string; status: SpeechStatus };
@@ -15,11 +15,13 @@ export function parseSpeechStatus(raw: string): SpeechStatus {
   if (typeof data.available !== 'boolean' || typeof data.enabled !== 'boolean' || typeof data.speaking !== 'boolean' ||
       typeof data.message !== 'string' || data.provider !== 'system' ||
       !(data.voice_id === null || typeof data.voice_id === 'string') ||
+      !(data.ready === undefined || typeof data.ready === 'boolean') ||
       !(data.owner === undefined || data.owner === null || data.owner === 'chat' || data.owner === 'voice')) {
     throw new Error('朗读状态无效，请更新 App 后重试。');
   }
   return { available: data.available, enabled: data.enabled, speaking: data.speaking, message: data.message,
-    provider: 'system', voice_id: data.voice_id, owner: data.owner } as SpeechStatus;
+    provider: 'system', voice_id: data.voice_id, owner: data.owner,
+    ...(data.ready === undefined ? {} : { ready: data.ready }) } as SpeechStatus;
 }
 
 /** Read prose, not code blocks or remote addresses. Never alters the displayed reply. */

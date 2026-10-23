@@ -922,3 +922,174 @@ def test_browser_polls_shared_history_without_page_reload(page, browser_app):
     button.click()
     app.state.memory.append(session['id'], 'assistant', '电脑与开发者模式也能继续查看')
     playwright_api.expect(page.locator('.message.assistant .message-body').last).to_have_text('电脑与开发者模式也能继续查看', timeout=8000)
+
+
+def stub_proactive(page):
+    control = {'available': True, 'enabled': False, 'generation': 0, 'cursor': 0,
+               'provider': 'codex', 'phase': 'off', 'message': '观察已关闭。', 'reason': '',
+               'interval_seconds': 120, 'probability': .3, 'cooldown_seconds': 600,
+               'max_analyses_per_hour': 3, 'fail': False}
+    calls, polls, items = [], [], []
+
+    def public():
+        return {key: value for key, value in control.items() if key != 'fail'}
+
+    def status(route):
+        if route.request.method == 'POST':
+            body = route.request.post_data_json
+            calls.append(body)
+            if control['fail']:
+                return route.fulfill(status=503, json={'detail': '测试观察器拒绝更改'})
+            control['generation'] += 1
+            control['enabled'] = body['enabled']
+            control['phase'] = 'waiting' if body['enabled'] else 'off'
+            control['message'] = '等待下一次概率观察。' if body['enabled'] else '观察已关闭。'
+            if body.get('provider'):
+                control['provider'] = 'codex' if body['provider'] == 'auto' else body['provider']
+        route.fulfill(json=public())
+
+    def events(route):
+        polls.append(route.request.url)
+        route.fulfill(json={'events': list(items), 'cursor': control['cursor']})
+
+    page.route('**/api/proactive', status)
+    page.route('**/api/proactive/events?*', events)
+    page.route('**/api/greeting', lambda route: route.fulfill(json={'greeting': None, 'pending': False}))
+    page.reload()
+    playwright_api.expect(page.locator('#proactive-control')).to_have_text('主动建议：关')
+    return control, calls, polls, items
+
+
+def test_browser_proactive_is_opt_in_independent_and_explains_privacy(page, browser_app):
+    _, app = browser_app
+    control, calls, polls, items = stub_proactive(page)
+    page.evaluate('async () => { await pollProactive(); await pollProactive(); }')
+    assert not calls and not polls and not items
+    page.locator('#proactive-control').click()
+    playwright_api.expect(page.locator('#proactive-control')).to_have_attribute('aria-pressed', 'true')
+    playwright_api.expect(page.locator('#mouse-control')).to_have_attribute('aria-pressed', 'false')
+    playwright_api.expect(page.locator('#proactive-note')).to_contain_text('30%')
+    playwright_api.expect(page.locator('#proactive-note')).to_contain_text('每小时最多 3 次')
+    assert calls == [{'enabled': True, 'provider': 'auto'}]
+    page.locator('[data-view="settings"]').click()
+    playwright_api.expect(page.locator('#proactive-setting')).to_be_checked()
+    content = page.locator('.settings-card').filter(has=page.locator('#proactive-setting'))
+    playwright_api.expect(content).to_contain_text('密码窗口会尽力跳过，但无法识别所有敏感内容')
+    playwright_api.expect(content).to_contain_text('不会自动点击或执行工具')
+    playwright_api.expect(page.locator('#voice-start')).to_have_text('手动开启语音对话')
+    voice = page.locator('.settings-card').filter(has=page.locator('#voice-status'))
+    playwright_api.expect(voice).to_contain_text('不用先叫名字')
+    playwright_api.expect(voice).to_contain_text('旁人或电视声音也可能被识别')
+    page.locator('#proactive-setting').click()
+    playwright_api.expect(page.locator('#proactive-setting')).not_to_be_checked()
+    page.evaluate('pollProactive()')
+    assert calls[-1] == {'enabled': False} and not polls
+    assert app.state.memory.sessions() == [] and not app.state.model_requests
+
+
+def test_browser_proactive_notices_are_bounded_plain_text_and_not_saved_or_spoken(page, browser_app):
+    _, app = browser_app
+    control, calls, polls, items = stub_proactive(page)
+    speech_calls = []
+    page.route('**/api/speech/speak', lambda route: (speech_calls.append(route.request.post_data_json), route.fulfill(json={})))
+    page.locator('#proactive-control').click()
+    playwright_api.expect(page.locator('#proactive-control')).to_have_attribute('aria-pressed', 'true')
+    for number in range(1, 9):
+        items.append({'id': number, 'kind': 'question' if number % 2 else 'suggestion',
+                      'message': f'临时建议 {number} <img src=x onerror="window.proactiveXss=true">',
+                      'generation': control['generation']})
+    control['cursor'] = 8
+    page.evaluate('pollProactive()')
+    playwright_api.expect(page.locator('.proactive-notice')).to_have_count(5)
+    playwright_api.expect(page.locator('.proactive-notice').last).to_contain_text('临时建议 8')
+    assert page.locator('.proactive-notice img').count() == 0
+    assert not page.evaluate('window.proactiveXss || false')
+    assert page.locator('#messages .message').count() == 0
+    assert not app.state.memory.sessions() and not speech_calls
+    page.evaluate('pollProactive()')
+    assert polls[-1].endswith('after=8')
+    playwright_api.expect(page.locator('.proactive-notice')).to_have_count(5)
+    page.locator('#proactive-control').click()
+    playwright_api.expect(page.locator('.proactive-notice')).to_have_count(0)
+    assert not control['enabled']
+
+
+def test_browser_proactive_toggle_failure_never_fakes_revocation(page):
+    control, calls, polls, items = stub_proactive(page)
+    control['fail'] = True
+    page.locator('#proactive-control').click()
+    playwright_api.expect(page.locator('#toast')).to_contain_text('设置未确认')
+    playwright_api.expect(page.locator('#proactive-control')).to_have_attribute('aria-pressed', 'false')
+    control['fail'] = False
+    page.locator('#proactive-control').click()
+    playwright_api.expect(page.locator('#proactive-control')).to_have_attribute('aria-pressed', 'true')
+    control['fail'] = True
+    page.locator('#proactive-control').click()
+    playwright_api.expect(page.locator('#proactive-control')).to_have_attribute('aria-pressed', 'true')
+    playwright_api.expect(page.locator('#proactive-note')).to_contain_text('等待下一次概率观察')
+    assert calls == [{'enabled': True, 'provider': 'auto'}, {'enabled': True, 'provider': 'auto'}, {'enabled': False}]
+
+
+def test_browser_proactive_late_event_cannot_return_after_disable(page):
+    control, calls, polls, items = stub_proactive(page)
+    page.locator('#proactive-control').click()
+    playwright_api.expect(page.locator('#proactive-control')).to_have_attribute('aria-pressed', 'true')
+    page.evaluate('''() => {
+        const original = window.fetch;
+        window.fetch = (path, options) => path.startsWith('/api/proactive/events?')
+            ? new Promise(resolve => window.releaseProactive = () => resolve(new Response(JSON.stringify({
+                events: [{id: 1, kind: 'suggestion', message: '已经关闭后的过期建议', generation: 1}], cursor: 1
+              }), {headers: {'Content-Type': 'application/json'}})))
+            : original(path, options);
+        void pollProactive();
+    }''')
+    page.wait_for_function('() => typeof window.releaseProactive === "function"')
+    page.locator('#proactive-control').click()
+    playwright_api.expect(page.locator('#proactive-control')).to_have_attribute('aria-pressed', 'false')
+    page.evaluate('window.releaseProactive()')
+    page.wait_for_function('() => !proactivePolling')
+    assert page.locator('.proactive-notice').count() == 0
+
+
+def test_browser_proactive_provider_changes_and_generation_filtering(page):
+    control, calls, polls, items = stub_proactive(page)
+    page.locator('#proactive-control').click()
+    playwright_api.expect(page.locator('#proactive-control')).to_have_attribute('aria-pressed', 'true')
+    page.locator('[data-view="settings"]').click()
+    page.locator('#chat-provider').select_option('api')
+    playwright_api.expect(page.locator('#proactive-status')).to_contain_text('视觉 API')
+    assert calls[-1] == {'enabled': True, 'provider': 'api'}
+    items.extend([{'id': 1, 'generation': 1, 'kind': 'suggestion', 'message': '旧来源不显示'},
+                  {'id': 2, 'generation': control['generation'], 'kind': 'question', 'message': '新来源的问题'}])
+    control['cursor'] = 2
+    page.evaluate('pollProactive()')
+    page.locator('[data-view="chat"]').click()
+    playwright_api.expect(page.locator('.proactive-notice')).to_have_count(1)
+    playwright_api.expect(page.locator('.proactive-notice')).to_contain_text('新来源的问题')
+    page.set_viewport_size({'width': 390, 'height': 844})
+    playwright_api.expect(page.locator('#proactive-control')).to_be_visible()
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+
+
+def test_browser_startup_greeting_retries_pending_without_creating_history_or_double_tts(page, browser_app):
+    _, app = browser_app
+    calls, speech_calls = [], []
+
+    def greeting(route):
+        calls.append(route.request.method)
+        if len(calls) == 1:
+            return route.fulfill(json={'greeting': None, 'pending': True})
+        route.fulfill(json={'greeting': {'id': 'startup', 'message': '你好，我是夏鱼洛。今天想聊什么？'}, 'pending': False})
+
+    page.route('**/api/greeting', greeting)
+    page.route('**/api/speech/speak', lambda route: (speech_calls.append(route.request.post_data_json), route.fulfill(json={})))
+    page.reload()
+    playwright_api.expect(page.locator('.startup-greeting')).to_contain_text('你好，我是夏鱼洛', timeout=6000)
+    page.evaluate('async () => { await claimGreeting(); await claimGreeting(); }')
+    assert calls == ['POST', 'POST'] and not speech_calls
+    assert not app.state.memory.sessions() and page.locator('#messages .message').count() == 0
+    # Disabling the observer must not erase an unrelated once-per-start greeting.
+    page.evaluate("async () => { proactiveKnown=true; proactiveState={available:true,enabled:true,generation:1,cursor:0}; renderProactive(); }")
+    page.route('**/api/proactive', lambda route: route.fulfill(json={'available': True, 'enabled': False, 'generation': 2, 'cursor': 0}))
+    page.locator('#proactive-control').click()
+    playwright_api.expect(page.locator('.startup-greeting')).to_have_count(1)

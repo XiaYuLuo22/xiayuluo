@@ -7,6 +7,7 @@ import { UpdateCard } from './src/UpdateCard';
 import { VoiceCard } from './src/VoiceCard';
 import { useVoice } from './src/voice';
 import { useReplySpeech } from './src/speech';
+import { StartupGreeting } from './src/startupGreeting';
 import { Client, loadConnection, pairDevice, saveConnection, type Action, type Connection,
   type Memory, type Message, type Session, type Workspace } from './src/client';
 
@@ -23,6 +24,8 @@ function Home() {
   const [connection, setConnection] = useState<Connection | null>(null);
   const [ready, setReady] = useState(false);
   const [online, setOnline] = useState(false);
+  const [foreground, setForeground] = useState(AppState.currentState === 'active');
+  const [greeting, setGreeting] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -42,19 +45,41 @@ function Home() {
   const [name, setName] = useState('我的手机');
   const controller = useRef<AbortController | null>(null);
   const list = useRef<FlatList<Message>>(null);
+  const greetingGate = useRef(new StartupGreeting());
   // New installs default to the owner's authorized automatic policy. Host-only
   // operations still require an online paired connection and observed workspace.
   const automatic = workspace?.approvals !== 'desktop-only';
   const voice = useVoice(connection, ready, online);
   const speech = useReplySpeech(!!connection, online);
+  const greetingEligible = useRef(false);
+  greetingEligible.current = ready && !!connection && online && foreground && tab === 'chat' &&
+    !history && !busy && !draft.trim();
 
   useEffect(() => {
     let alive = true;
     loadConnection().then(value => { if (alive) setConnection(value); })
       .catch(() => { if (alive) setNotice('无法读取安全存储，请在设备页重新配对。'); })
       .finally(() => { if (alive) setReady(true); });
-    return () => { alive = false; controller.current?.abort(); };
+    const listener = AppState.addEventListener('change', state => setForeground(state === 'active'));
+    return () => { alive = false; greetingEligible.current = false; listener.remove(); controller.current?.abort(); };
   }, []);
+
+  useEffect(() => {
+    const text = greetingGate.current.take({ ready, connected: !!connection, online, foreground,
+      visible: tab === 'chat' && !history, idle: !busy && !draft.trim(),
+      speechReady: !speech.supported || !!speech.error ||
+        (speech.known && (!speech.status.enabled || speech.status.ready !== false)) });
+    if (!text) return;
+    setGreeting(text);
+    // The welcome stays local and is never appended to the shared session,
+    // saved as memory, or replayed by history polling. Shared playback pauses ASR.
+    void (async () => {
+      const turn = await speech.beginTurn();
+      if (!greetingEligible.current || AppState.currentState !== 'active') return;
+      await speech.completeTurn(turn, text, { mode: 'chat', complete: true, pending: false, aborted: false });
+    })();
+  }, [ready, connection, online, foreground, tab, history, busy, draft, speech.supported, speech.known,
+    speech.error, speech.status.enabled, speech.status.ready]);
 
   // The computer is authoritative. Poll only while foregrounded and not streaming;
   // no offline mutation queue, silent resends, or replicated memory promotion.
@@ -98,6 +123,7 @@ function Home() {
     try {
       await speech.stop();
       await voice.stop();
+      setGreeting(null);
       await saveConnection(null); setConnection(null); setOnline(false); setSelected(null);
       setMessages([]); setSessions([]); setMemories([]); setTasks([]); setWorkspace(null); setDraft(''); setMemoryDraft('');
       setNotice('已移除此手机的本地凭据。要彻底撤销访问，请同时在电脑设备页撤销设备。');
@@ -110,6 +136,7 @@ function Home() {
       setNotice('电脑项目目录或 Codex CLI 未就绪。请先在电脑设置 CODEX_WORKSPACE、安装并登录官方 Codex，再刷新连接。'); return;
     }
     const prompt = draft.trim(), client = new Client(connection);
+    setGreeting(null);
     const abort = new AbortController(); controller.current = abort;
     setBusy(true); setNotice(''); let text = '', pending = false, complete = false;
     const targetId = -Date.now();
@@ -140,7 +167,7 @@ function Home() {
   }
   function stopReply() { controller.current?.abort(); void speech.stop(); }
   function selectSession(id: string | null) {
-    void speech.stop(); setSelected(id); setMessages([]); setTab('chat');
+    void speech.stop(); setGreeting(null); setSelected(id); setMessages([]); setTab('chat');
   }
   async function saveMemory() {
     if (!connection || !online || busy || !memoryDraft.trim() || tier === 'temporary') return;
@@ -173,7 +200,10 @@ function Home() {
     {tab === 'chat' && <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <FlatList ref={list} data={messages} keyExtractor={item => String(item.id)} contentContainerStyle={s.chatList}
         onContentSizeChange={() => list.current?.scrollToEnd({ animated: false })}
-        ListEmptyComponent={<View style={s.welcome}><Text style={s.hero}>✦</Text><Text style={s.title}>你好，我是夏鱼洛</Text>
+        ListHeaderComponent={greeting ? <View style={s.greeting} accessibilityLiveRegion="polite">
+          <Text style={s.messageName}>✦ 夏鱼洛 · 本次问候</Text><Text style={s.messageText}>{greeting}</Text>
+        </View> : undefined}
+        ListEmptyComponent={<View style={s.welcome}><Text style={s.hero}>✦</Text><Text style={s.title}>{greeting ? '今天，从哪里开始？' : '你好，我是夏鱼洛'}</Text>
           <Text style={s.description}>随时聊聊，也把想法带回电脑。{ '\n' }同一段对话，换个设备继续。</Text>
           {['聊聊今天发生的事', '帮我整理一个学习计划', '让 Codex 看看我的项目'].map((text, index) =>
             <Pressable key={text} style={s.suggestion} onPress={() => { setDraft(text); setMode(index === 2 ? 'codex' : 'chat'); }}>
@@ -227,6 +257,9 @@ function Home() {
         <Text style={s.hint}>{speech.error || speech.status.message}</Text>
       </View>
       <VoiceCard voice={voice} disabled={busy} automatic={automatic} onSession={id => { if (!busy) selectSession(id); }} />
+      <View style={s.card}><Text style={s.cardText}>主动关怀 · 电脑活动</Text>
+        <Text style={s.hint}>在 Windows 电脑的对话栏单独开启后，夏鱼洛可以低频观察电脑屏幕，偶尔提出建议或问题。与鼠标控制分开，不会因此执行操作。此手机不读取其他 App 或手机屏幕；请在电脑查看和管理此功能。</Text>
+      </View>
       {connection ? <View style={s.card}><Text style={s.cardText}>{connection.name}</Text><Text selectable style={s.hint}>{connection.url}</Text>
         <Text style={s.hint}>凭据保存在系统安全存储，不同步模型密钥。解除本机配对不会删除电脑数据。</Text>
         <Button label="解除本机配对" disabled={busy} onPress={() => automatic ? void disconnect() : Alert.alert('解除配对？', '清除此手机凭据。电脑中可另行撤销访问权限。', [{ text: '取消' }, { text: '解除', style: 'destructive', onPress: () => void disconnect() }])} /></View> : <View style={s.card}>
@@ -272,6 +305,7 @@ const s = StyleSheet.create({
   title: { fontSize: 26, fontWeight: '600', color: '#304c37', marginBottom: 15 }, description: { color: '#7b8b74', fontSize: 13, lineHeight: 24, marginBottom: 25 },
   suggestion: { borderWidth: 1, borderColor: '#e3e9dd', backgroundColor: '#fff', padding: 17, borderRadius: 14, marginBottom: 11, flexDirection: 'row', justifyContent: 'space-between' }, suggestionText: { color: '#607655', fontSize: 13 },
   message: { marginBottom: 23, paddingVertical: 5 }, userMessage: { alignSelf: 'flex-end', maxWidth: '88%', backgroundColor: '#edf3e7', padding: 14, borderRadius: 16 },
+  greeting: { backgroundColor: '#f0f5eb', borderRadius: 14, padding: 16, marginBottom: 20 },
   messageName: { color: '#7a9971', fontSize: 11, marginBottom: 10 }, messageText: { color: '#3b5237', fontSize: 14, lineHeight: 25 },
   composer: { marginHorizontal: 18, borderWidth: 1, borderColor: '#dfe7d8', backgroundColor: '#fff', borderRadius: 20, padding: 15 },
   prompt: { minHeight: 50, maxHeight: 140, fontSize: 13, lineHeight: 22, color: '#3b5237', textAlignVertical: 'top' },

@@ -83,6 +83,7 @@ object SpeechOutput {
 
     fun status(): JSONObject = synchronized(lock) {
         JSONObject().put("available", available).put("enabled", enabled).put("speaking", active)
+            .put("ready", ready.count == 0L)
             .put("owner", current?.owner ?: JSONObject.NULL).put("provider", "system")
             .put("voice_id", selectedVoice ?: JSONObject.NULL).put("message", message)
     }

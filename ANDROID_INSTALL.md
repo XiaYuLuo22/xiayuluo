@@ -2,7 +2,15 @@
 
 ## 安装
 
-最新0.1.11回复朗读/应用内更新入口测试包：`xiayuluo-0.1.11-android-arm64-final.apk`（versionCode12，77,735,822字节，约74.1MiB），安装ZIP为`xiayuluo-0.1.11-android-arm64-install.zip`（57,108,155字节，约54.5MiB）。APK SHA-256：`62660b6e41fc2f69ca015739ab96373d01b4157c254525f851c7e735a0ca60e3`。已完成真实Gradle release编译、既有独立证书v2签名、ZIP CRC、16KB zipalign、版本/ARM64/最低Android7.0和实际内嵌JS逐字节核验；原生朗读绑定保留，新增的Android11+ `TTS_SERVICE`查询已在最终APK中验证。签名证书SHA-256仍为`bef9a3315531035f91362a72fd3012198304fd83d21d07009d67fd1df90ac96a`，没有替换成debug key。
+最新0.1.12主动问候/免唤醒对话测试包：`xiayuluo-0.1.12-android-arm64-final.apk`（versionCode13，77,738,838字节，约74.1MiB），安装ZIP为`xiayuluo-0.1.12-android-arm64-install.zip`（57,115,228字节，约54.5MiB）。APK SHA-256：`3280ee8ed12a85c05f8caf2661294c252c34f865119adb597fb3741bb1c18a3b`。已完成真实Gradle release编译、原独立证书v2签名、CRC、16KB zipalign、版本/ARM64/最低Android7.0、内嵌JS逐字节一致性核验；最终DEX包含免唤醒语音文案，保留TTS_SERVICE发现声明与singleTask入口，最终权限与0.1.11相同。签名证书SHA-256仍为`bef9a3315531035f91362a72fd3012198304fd83d21d07009d67fd1df90ac96a`。
+
+两端启动本次只主动问候一次，尊重系统朗读开关；麦克风运行时直接说话，无需先叫名字，旁人/电视也可能被识别。说“结束对话”或“停止监听”即关麦并撤销租约，需要手动重开；仍需配对电脑在线和官方Codex CLI登录，不是连接手机ChatGPT App。电脑端建议同时更新0.1.12，才能使用电脑聊天栏独立「主动建议」开关；手机不读其他App，不增加读屏权限。问候和电脑建议不写入共享历史或四级记忆，详见VOICE.md与ACTIVITY.md。
+
+覆盖安装前不要卸载旧版，保留本机配对信息。若手机聊天App无法预览大文件，可在电脑下载ZIP、传到手机后解压安装；不需要自行编译。在线签名更新源仍未发布，不会因此自动下载本版。尚未真机验证语音、后台或跨版覆盖安装。
+
+以下为0.1.11及更早的历史构建记录：
+
+0.1.11回复朗读/应用内更新入口测试包：`xiayuluo-0.1.11-android-arm64-final.apk`（versionCode12，77,735,822字节，约74.1MiB），安装ZIP为`xiayuluo-0.1.11-android-arm64-install.zip`（57,108,155字节，约54.5MiB）。APK SHA-256：`62660b6e41fc2f69ca015739ab96373d01b4157c254525f851c7e735a0ca60e3`。已完成真实Gradle release编译、既有独立证书v2签名、ZIP CRC、16KB zipalign、版本/ARM64/最低Android7.0和实际内嵌JS逐字节核验；原生朗读绑定保留，新增的Android11+ `TTS_SERVICE`查询已在最终APK中验证。签名证书SHA-256仍为`bef9a3315531035f91362a72fd3012198304fd83d21d07009d67fd1df90ac96a`，没有替换成debug key。
 
 普通文字新回复完成后默认使用系统本地中文声音朗读，聊天栏/设备页可独立关闭或停止，不要求开启麦克风；历史、失败/未完成或待确认回复不自动读，切会话/新问题/关开不重放旧回复。先用系统本地音色，后续可挑选替换，不新增网络TTS服务。没有已安装中文离线声音时提示实际原因，文字聊天仍可用；真实手机音色、扬声器/麦克风回声、后台及覆盖升级仍未真机验收。
 
@@ -50,7 +58,7 @@ App 的界面与 JavaScript 已内嵌，打开界面不需要 Expo Go 或 Metro 
 
 手机是已配对电脑的客户端，不会离线运行模型或在手机本机运行 Codex。
 
-1. 电脑使用 0.1.6 夏鱼洛服务，在 `.env` 中开启 `MOBILE_ENABLED=true`、设置 `CODEX_WORKSPACE` 为已有项目目录，重启 App。需要修改代码时由本人在电脑明确选择 `CODEX_SANDBOX=workspace-write`，默认只读。
+1. 电脑使用 0.1.12 夏鱼洛服务，在 `.env` 中开启 `MOBILE_ENABLED=true`、设置 `CODEX_WORKSPACE` 为已有项目目录，重启 App。需要修改代码时由本人在电脑明确选择 `CODEX_SANDBOX=workspace-write`，默认只读。
 2. 配置由你掌控的 HTTPS 同步地址，仅发布 `/mobile/` 路径；完整说明见 `MOBILE.md` 和 `deploy/Caddyfile.example`。本次构建不会替你公开电脑端口或部署公网服务器。
 3. 电脑进入「设备与同步」，生成 5 分钟有效的一次性邀请。
 4. 手机进入底部「设备」，填写 HTTPS 地址、手机名称、邀请，点击配对。电脑保持在线后即可共享会话和四级记忆。

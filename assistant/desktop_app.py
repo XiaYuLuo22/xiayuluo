@@ -113,13 +113,16 @@ class LocalService:
 
     def on_window_shown(self):
         with self.stop_lock:
-            if not self.stopped and self.app.state.voice:
-                self.app.state.voice.app_opened()
+            if not self.stopped:
+                self.app.state.native_window_open = True
+                if self.app.state.voice:
+                    self.app.state.voice.app_opened()
 
     def stop(self):
         with self.stop_lock:
             if self.stopped:
                 return
+            self.app.state.native_window_open = False
             if self.app.state.voice:
                 self.app.state.voice.stop()
             speech = getattr(self.app.state, 'speech', None)

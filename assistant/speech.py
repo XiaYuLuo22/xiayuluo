@@ -263,7 +263,7 @@ class NativeSpeech:
                     self.active = ticket
                     voice_id = self.voice_id or chinese['id']
                     callback = self.activity_callback
-                    self.phase, self.message = 'speaking', '正在系统朗读；已暂停唤醒识别。'
+                    self.phase, self.message = 'speaking', '正在系统朗读；已暂停语音识别。'
                 try:
                     if callback:
                         callback(True)

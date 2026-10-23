@@ -1,6 +1,8 @@
 """Authorized offline microphone recognition, independent of the desktop renderer.
 
-Only post-wake utterances reach the existing chat API. No audio is saved/uploaded.
+While visibly enabled, completed utterances reach the read-only chat API without
+a wake word. No audio is saved/uploaded. Stop closes the microphone until a new
+explicit start (or the next application launch).
 Tool/Codex approvals are deliberately not implemented here.
 """
 import importlib.util
@@ -20,7 +22,7 @@ STOP_WORDS = {"停止对话", "结束对话", "退出语音", "停止监听"}
 
 
 class WakeGate:
-    """Feed completed offline ASR utterances, never partial hypotheses."""
+    """Legacy wake-word gate, retained for compatibility, not used by the service."""
     def __init__(self, clock=time.monotonic):
         self.clock, self.until = clock, 0.0
 
@@ -42,6 +44,33 @@ class WakeGate:
 
     def resume(self):
         self.until = self.clock() + 30
+
+
+class ConversationGate:
+    """No-wake mode for a visibly enabled microphone; final transcripts only.
+
+    This is not speaker authentication: nearby speech can be recognized too.
+    Stop commands close this gate permanently, rather than silently returning to
+    wake-word listening or restarting after an answer.
+    """
+    def __init__(self):
+        self.stopped = False
+
+    def feed(self, text):
+        if self.stopped:
+            return "ignore", ""
+        text = re.sub(r"\s+", " ", text).strip()[:2000].strip("，。！？,.!?、 ")
+        if not text:
+            return "ignore", ""
+        command = re.sub(r"\s+", "", text)
+        for name in WAKE_NAMES:
+            if command.startswith(name):
+                command = command[len(name):].strip("，。！？,.!?、")
+                break
+        if command in STOP_WORDS:
+            self.stopped = True
+            return "stop", ""
+        return "chat", text
 
 
 def model_directory():
@@ -90,14 +119,14 @@ class DesktopVoice:
         stream.stop()
         self._clear_audio(samples)
         recognizer.Reset()
-        self.phase, self.message = "speaking", "正在朗读回复，暂停麦克风识别以避免自唤醒。"
+        self.phase, self.message = "speaking", "正在朗读回复，暂停麦克风识别以避免回声。"
         while self.speech_active.is_set() and not self.stop_event.wait(.03):
             pass
         self._clear_audio(samples)
         recognizer.Reset()
         if not self.stop_event.is_set():
             stream.start()
-            self.phase, self.message = "listening", "正在本地监听“夏鱼洛”。"
+            self.phase, self.message = "listening", "可以直接说话，无需唤醒词；完整识别文字将用于只读问答。"
         return True
 
     def _speak(self, text):
@@ -119,13 +148,13 @@ class DesktopVoice:
             return False, '缺少语音依赖，请安装 .[app,desktop,voice] 或使用含语音的新版安装包。'
         if not (self.model / "am/final.mdl").is_file():
             return False, "缺少官方离线中文模型，请先运行 tools/prepare_voice_model.py。"
-        return True, "本地中文识别；唤醒后才向当前聊天服务发送文字。"
+        return True, "开启后无需唤醒词；本地完整识别的文字将发送至 Codex 只读问答，旁人的话也可能被识别。"
 
     def status(self):
         available, reason = self.available()
         return {"available": available, "reason": reason, "running": bool(self.thread and self.thread.is_alive()),
                 "phase": self.phase, "message": self.message, "session_id": self.session,
-                "wake_word": "夏鱼洛", "follow_up_seconds": 30,
+                "mode": "conversation", "wake_word": None, "follow_up_seconds": None,
                 "autostart": self.autostart, "autostart_attempted": self.autostart_attempted}
 
     def app_opened(self):
@@ -234,7 +263,7 @@ class DesktopVoice:
                     samples.put_nowait(bytes(data))
                 except Full:
                     overflow.set()
-            gate = WakeGate()
+            gate = ConversationGate()
             with httpx.Client(headers={"X-Assistant-Token": self.token}, trust_env=False,
                               timeout=httpx.Timeout(100, connect=5)) as client:
                 if self.stop_event.is_set():
@@ -257,7 +286,7 @@ class DesktopVoice:
                 with sd.RawInputStream(samplerate=16000, blocksize=4000, dtype="int16", channels=1, callback=receive) as stream:
                     self.microphone = stream
                     observed_speech_generation = self.speech_generation
-                    self.phase, self.message = "listening", "正在本地监听“夏鱼洛”；最小化后仍运行。"
+                    self.phase, self.message = "listening", "可以直接说话，无需唤醒词；最小化后仍运行，可随时停止监听。"
                     while not self.stop_event.is_set():
                         if observed_speech_generation != self.speech_generation:
                             self._clear_audio(samples)
@@ -282,25 +311,18 @@ class DesktopVoice:
                         if action == "stop":
                             self.stop_event.set()
                             break
-                        if action == "sleep":
-                            reply = "好的，等你再次呼唤夏鱼洛。"
-                        elif action == "wake":
-                            reply = "我在，请说。"
-                        else:
-                            self.phase, self.message = "thinking", "已唤醒，正在对话；回答时暂停识别。"
-                            reply = self._chat(client, prompt)
+                        self.phase, self.message = "thinking", "正在进行只读语音问答；回答时暂停识别。"
+                        reply = self._chat(client, prompt)
                         if self.stop_event.is_set():
                             break
-                        self.phase, self.message = "speaking", "正在朗读，暂停识别以避免自唤醒。"
+                        self.phase, self.message = "speaking", "正在朗读，暂停识别以避免回声。"
                         self._speak(reply)
                         self._clear_audio(samples)
                         recognizer.Reset()
-                        if action != "sleep":
-                            gate.resume()
                         self.stop_event.wait(.3)
                         if not self.stop_event.is_set():
                             stream.start()
-                            self.phase, self.message = "listening", "正在本地监听；唤醒后 30 秒内可接着说。"
+                            self.phase, self.message = "listening", "可以接着说话，无需唤醒词；说“停止监听”可关闭麦克风。"
         except Exception:
             if not self.stop_event.is_set():
                 self.phase, self.message = "error", "语音已停止：请检查离线模型、麦克风权限/占用、系统中文语音和聊天配置，再手动开启。"

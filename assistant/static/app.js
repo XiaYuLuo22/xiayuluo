@@ -161,7 +161,7 @@ async function refreshVoice() {
   } catch { $('#voice-status').textContent = '无法读取语音状态，请重新打开 App。'; }
 }
 $('#voice-start').addEventListener('click', guarded(async () => {
-  if (!approveLocally('开启本地麦克风持续监听“夏鱼洛”，并授权本次语音会话的 Codex 只读问答？\n最小化后仍运行，可能增加耗电；唤醒后的文字、近期上下文和相关记忆会发送到官方 Codex CLI，进入会话/记忆。不上传或保存环境录音，不使用付费 API。语音通道仅普通问答；编程、鼠标和记忆操作请用其他入口，遵循本机执行策略。停止监听即撤销，退出 App 即停止。')) return;
+  if (!approveLocally('开启本地麦克风语音对话，并授权本次语音会话的 Codex 只读问答？\n开启后不用先叫名字，识别到的话会发送给 Codex；旁人或电视的声音也可能被识别，请留意环境并随时停止。最小化后仍运行，可能增加耗电。只发送识别文字、近期上下文和相关记忆，不上传或保存环境录音，不使用付费 API。编程、鼠标和记忆操作不在语音授权内。停止即撤销，退出 App 即停止。')) return;
   await post('/api/voice/start', { confirm: true }); await refreshVoice();
 }));
 $('#voice-stop').addEventListener('click', guarded(async () => {
@@ -174,6 +174,137 @@ $('#voice-indicator').addEventListener('click', guarded(async () => {
 $('#voice-session').addEventListener('click', guarded(async () => {
   if (voiceSession && !state.busy) { await refreshSessions(); await loadSession(voiceSession); await openView('chat'); }
 }));
+
+// Optional activity suggestions are a separate, per-run screenshot grant. They
+// never create a conversation, call a tool, or replay through reply TTS/history.
+let proactiveState = { available: false, enabled: false, generation: 0, cursor: 0 };
+let proactiveKnown = false, proactiveChanging = false, proactiveVersion = 0;
+let proactivePolling = false, proactiveCursor = 0, proactivePollError = '';
+function clearProactiveNotices() {
+  $('#assistant-notices').querySelectorAll('.proactive-notice').forEach(node => node.remove());
+  $('#assistant-notices').hidden = !$('#assistant-notices').childElementCount;
+}
+function transientNotice(kind, text, id) {
+  if (typeof text !== 'string' || !text.trim() || text.length > 1200) return;
+  const container = $('#assistant-notices');
+  const notice = el('article', `assistant-notice ${kind === 'greeting' ? 'startup-greeting' : 'proactive-notice'}`);
+  notice.dataset.noticeId = String(id);
+  const title = kind === 'greeting' ? '夏鱼洛 · 问候' : kind === 'question' ? '夏鱼洛 · 随口问问' : '夏鱼洛 · 主动建议';
+  const heading = el('div', 'assistant-notice-heading');
+  const dismiss = el('button', 'text-button', '×');
+  dismiss.type = 'button'; dismiss.setAttribute('aria-label', `关闭${title}`);
+  dismiss.addEventListener('click', () => { notice.remove(); container.hidden = !container.childElementCount; });
+  heading.append(el('span', '', title), dismiss);
+  notice.append(heading, el('p', '', text), el('small', '', '仅本次窗口显示，不写入会话或记忆'));
+  container.append(notice);
+  while (container.childElementCount > 5) (container.querySelector('.proactive-notice') || container.firstElementChild).remove();
+  container.hidden = false; scrollChat();
+}
+function renderProactive() {
+  const enabled = proactiveKnown && proactiveState.enabled;
+  const unavailable = proactiveKnown && !enabled && !proactiveState.available;
+  const button = $('#proactive-control');
+  button.textContent = proactiveKnown ? `主动建议：${enabled ? '开' : '关'}` : '主动建议：未核实';
+  button.setAttribute('aria-pressed', String(enabled));
+  button.setAttribute('aria-busy', String(proactiveChanging));
+  button.disabled = proactiveChanging || unavailable;
+  $('#proactive-setting').checked = !!enabled;
+  $('#proactive-setting').disabled = proactiveChanging || unavailable;
+  const interval = Number.isFinite(proactiveState.interval_seconds) ? proactiveState.interval_seconds : 120;
+  const probability = Number.isFinite(proactiveState.probability) ? Math.round(proactiveState.probability * 100) : 30;
+  const cooldown = Number.isFinite(proactiveState.cooldown_seconds) ? proactiveState.cooldown_seconds : 600;
+  const limit = Number.isFinite(proactiveState.max_analyses_per_hour) ? proactiveState.max_analyses_per_hour : 3;
+  const provider = proactiveState.provider === 'codex' ? 'Codex · ChatGPT 登录' : proactiveState.provider === 'api' ? '所配置的视觉 API' : '当前所选引擎';
+  const note = proactiveChanging ? '正在更新本机主动建议授权…'
+    : !proactiveKnown ? '主动建议状态未核实，观察可能仍在运行；点击开关可请求关闭。'
+    : enabled ? `${proactiveState.message || '已开启前台窗口观察。'} 使用${provider}；每 ${interval} 秒有 ${probability}% 概率尝试分析，建议间隔至少 ${cooldown} 秒，每小时最多 ${limit} 次分析。${proactivePollError}`
+    : proactiveState.available ? '主动建议已关闭，不会为此功能读取屏幕。开启后才会间歇读取当前前台窗口。'
+    : proactiveState.reason || '主动建议暂不可用；不会假装正在观察。';
+  $('#proactive-note').textContent = note;
+  $('#proactive-status').textContent = `${proactiveState.phase ? `状态：${proactiveState.phase} · ` : ''}${note}`;
+  button.title = note;
+}
+function acceptProactive(info) {
+  if (!info || typeof info.enabled !== 'boolean' || !Number.isInteger(info.generation)) throw new Error('主动建议状态格式无效。');
+  if (proactiveKnown && info.generation < proactiveState.generation) return;
+  if (!proactiveKnown || info.generation !== proactiveState.generation || !info.enabled) {
+    clearProactiveNotices();
+    const cursor = Number.isInteger(info.cursor) && info.cursor >= 0 ? info.cursor : 0;
+    proactiveCursor = proactiveKnown && proactiveState.enabled && info.enabled ? Math.min(proactiveCursor, cursor) : cursor;
+  }
+  proactiveState = info; proactiveKnown = true; proactivePollError = ''; renderProactive();
+}
+async function refreshProactive() {
+  const version = proactiveVersion;
+  try {
+    const info = await json('/api/proactive');
+    if (version === proactiveVersion && !proactiveChanging) acceptProactive(info);
+  } catch {
+    if (version === proactiveVersion) { proactiveKnown = false; renderProactive(); }
+  }
+}
+async function setProactive(enabled, provider = state.provider) {
+  if (proactiveChanging) return;
+  if (enabled && (!proactiveKnown || !proactiveState.available)) return;
+  proactiveChanging = true; const version = ++proactiveVersion; renderProactive();
+  try {
+    const info = await post('/api/proactive', { enabled, ...(enabled ? { provider } : {}) });
+    if (version === proactiveVersion) acceptProactive(info);
+    if (info.enabled !== enabled) throw new Error('服务未接受主动建议设置。');
+  } catch (error) {
+    proactiveKnown = false;
+    proactiveChanging = false;
+    await refreshProactive();
+    toast(`主动建议设置未确认：${error.message}`);
+  } finally {
+    proactiveChanging = false; renderProactive();
+  }
+}
+function toggleProactive() {
+  return setProactive(proactiveKnown && !proactiveState.enabled);
+}
+async function pollProactive() {
+  if (!state.token || !proactiveKnown || !proactiveState.enabled || proactiveChanging || proactivePolling || document.hidden) return;
+  proactivePolling = true;
+  const version = proactiveVersion;
+  try {
+    const info = await json('/api/proactive');
+    if (version !== proactiveVersion || proactiveChanging) return;
+    acceptProactive(info);
+    if (!proactiveState.enabled) return;
+    const generation = proactiveState.generation;
+    const result = await json(`/api/proactive/events?after=${proactiveCursor}`);
+    if (version !== proactiveVersion || proactiveChanging || !proactiveState.enabled || generation !== proactiveState.generation) return;
+    if (!Array.isArray(result.events) || !Number.isInteger(result.cursor) || result.cursor < proactiveCursor) throw new Error('提醒列表格式无效。');
+    const seen = new Set();
+    for (const item of result.events) {
+      if (!item || item.generation !== generation || !Number.isInteger(item.id) || item.id <= proactiveCursor || item.id > result.cursor || seen.has(item.id) || !['suggestion', 'question'].includes(item.kind)) continue;
+      seen.add(item.id);
+      transientNotice(item.kind, item.message, item.id);
+    }
+    proactiveCursor = result.cursor;
+  } catch {
+    if (version === proactiveVersion) { proactivePollError = ' 提醒同步失败；观察可能仍运行，可随时关闭开关。'; renderProactive(); }
+  } finally { proactivePolling = false; }
+}
+$('#proactive-control').addEventListener('click', guarded(toggleProactive));
+$('#proactive-setting').addEventListener('change', guarded(toggleProactive));
+setInterval(() => void pollProactive(), 5000);
+
+let greetingKnown = false, greetingBusy = false, greetingRetry;
+async function claimGreeting() {
+  if (!state.token || greetingKnown || greetingBusy) return;
+  greetingBusy = true;
+  try {
+    const result = await post('/api/greeting');
+    if (result.greeting?.id === 'startup') {
+      greetingKnown = true;
+      transientNotice('greeting', result.greeting.message, 'startup');
+    } else if (!result.pending) greetingKnown = true;
+    else greetingRetry = setTimeout(() => void claimGreeting(), 1000);
+  } catch { greetingKnown = true; } // Unsupported/headless hosts never get fabricated greetings.
+  finally { greetingBusy = false; }
+}
 $('#download-update').addEventListener('click', async () => {
   if (updateBusy || state.busy) return toast('请先完成或停止当前任务。');
   const result = await checkForUpdates();
@@ -751,6 +882,9 @@ $('#chat-provider').addEventListener('change', guarded(async event => {
   await refreshStatus();
   if (usingCodex()) void connectCodex();
 }));
+$('#chat-provider').addEventListener('change', guarded(async () => {
+  if (!state.busy && proactiveKnown && proactiveState.enabled) await setProactive(true, state.provider);
+}));
 $('#session-search').addEventListener('input', renderSessions);
 
 $('#chat-form').addEventListener('submit', guarded(sendMessage));
@@ -767,6 +901,7 @@ document.querySelectorAll('[data-suggestion]').forEach((node) => node.addEventLi
 }));
 document.addEventListener('keydown', (event) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); guarded(newChat)(); } });
 $('#refresh-status').addEventListener('click', guarded(refreshStatus));
+$('#refresh-status').addEventListener('click', () => void refreshProactive());
 $('#add-memory').addEventListener('click', () => $('#memory-dialog').showModal());
 document.querySelectorAll('[data-close]').forEach((node) => node.addEventListener('click', () => $(`#${node.dataset.close}`).close()));
 $('#memory-form').addEventListener('submit', guarded(async (event) => {
@@ -794,6 +929,8 @@ $('#plugin-form').addEventListener('submit', guarded(async (event) => {
 }));
 guarded(async () => {
   const bootstrap = await (await fetch('/api/bootstrap')).json(); state.token = bootstrap.token;
+  void refreshProactive();
+  void claimGreeting();
   void refreshVoice();
   setInterval(() => void refreshVoice(), 3000);
   void refreshSpeech();

@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import sys
 import zipfile
 from queue import Queue
 from threading import Event, Thread
@@ -8,7 +9,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from assistant.voice import DesktopVoice, WakeGate
+from assistant.voice import ConversationGate, DesktopVoice, WakeGate
 from tools.prepare_voice_model import MODEL, unpack
 
 
@@ -81,6 +82,75 @@ def test_wake_gate_resumes_window_only_after_answer_and_bounds_input():
     gate.resume()
     assert gate.feed('请继续') == ('chat', '请继续')
     assert len(gate.feed('x' * 9000)[1]) == 2000
+
+
+def test_conversation_gate_needs_no_name_or_follow_up_window():
+    gate = ConversationGate()
+    assert gate.feed('今天星期几') == ('chat', '今天星期几')
+    assert gate.feed('  hello   world  ') == ('chat', 'hello world')
+    assert gate.feed('夏鱼洛，请介绍一下你自己') == ('chat', '夏鱼洛，请介绍一下你自己')
+    assert gate.feed(' \n ，。！？,.!?、 ') == ('ignore', '')
+    assert len(gate.feed('x' * 9000)[1]) == 2000
+
+
+@pytest.mark.parametrize('command', ['停止对话', '结束对话', '退出语音', '停止监听', '夏鱼洛，停止监听！'])
+def test_conversation_stop_closes_gate_without_wake_rearm(command):
+    gate = ConversationGate()
+    assert gate.feed(command) == ('stop', '')
+    assert gate.feed('夏鱼洛') == ('ignore', '')
+    assert gate.feed('稍后这句也不发送') == ('ignore', '')
+
+
+def test_running_voice_uses_no_wake_gate_and_revokes_when_ended(monkeypatch):
+    calls, replies = [], []
+
+    class Stream:
+        def __init__(self, *, callback, **kwargs):
+            self.callback = callback
+        def __enter__(self):
+            self.callback(b'first utterance', 1, None, None)
+            return self
+        def __exit__(self, *args):
+            return False
+        def stop(self):
+            calls.append('pause microphone')
+        def start(self):
+            self.callback(b'stop utterance', 1, None, None)
+
+    class Recognizer:
+        def __init__(self, *args):
+            self.count = 0
+        def AcceptWaveform(self, audio):
+            self.count += 1
+            return True
+        def Result(self):
+            return json.dumps({'text': '今天星期几' if self.count == 1 else '结束对话'})
+        def Reset(self):
+            pass
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def request(self, method, url, *, json):
+            calls.append((method, url, json))
+            return httpx.Response(200, json={'session_id': 'a' * 32, 'voice_token': 'fixture-lease'})
+
+    monkeypatch.setitem(sys.modules, 'sounddevice', SimpleNamespace(RawInputStream=Stream))
+    monkeypatch.setitem(sys.modules, 'vosk', SimpleNamespace(SetLogLevel=lambda _: None, Model=lambda _: object(), KaldiRecognizer=Recognizer))
+    monkeypatch.setattr('assistant.voice.httpx.Client', Client)
+    voice = DesktopVoice('http://127.0.0.1:12345', 'fixture')
+    voice._chat = lambda client, prompt: replies.append(prompt) or '星期五'
+    voice._speak = lambda text: calls.append(('speak', text))
+    voice._run()
+    assert replies == ['今天星期几']  # The actual service path, not only the gate, needs no name.
+    assert ('speak', '星期五') in calls
+    assert voice.stop_event.is_set() and voice.voice_token is None
+    assert any(isinstance(call, tuple) and '/voice/revoke' in call[1] for call in calls)
+    assert voice.status()['mode'] == 'conversation' and voice.status()['wake_word'] is None
 
 
 def test_voice_is_opt_in_and_unavailable_on_cloud():

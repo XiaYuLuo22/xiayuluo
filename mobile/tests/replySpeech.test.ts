@@ -140,10 +140,13 @@ test('code and links are skipped, prose retained and exceptionally long replies 
 
 test('malformed native state fails closed and output remains a local system provider', () => {
   for (const raw of ['bad', '{}', JSON.stringify({ ...base, enabled: 'yes' }),
-    JSON.stringify({ ...base, provider: 'remote' }), JSON.stringify({ ...base, voice_id: 123 })]) {
+    JSON.stringify({ ...base, provider: 'remote' }), JSON.stringify({ ...base, voice_id: 123 }),
+    JSON.stringify({ ...base, ready: 'yes' })]) {
     assert.throws(() => parseSpeechStatus(raw));
   }
   assert.deepEqual(parseSpeechStatus(JSON.stringify(base)), base);
+  for (const ready of [false, true])
+    assert.equal(parseSpeechStatus(JSON.stringify({ ...base, ready })).ready, ready);
 });
 
 test('effect cleanup and setup can reuse the controller without reviving old playback', async () => {

@@ -24,6 +24,7 @@ object VoiceState {
     @Volatile var micRecording = false
     fun snapshot(modelReady: Boolean) = JSONObject().put("available", modelReady).put("running", running)
         .put("phase", phase).put("message", if (modelReady) message else "安装包缺少离线中文模型，不能开启语音。")
+        .put("mode", "conversation").put("wake_word", JSONObject.NULL)
         .put("session_id", session ?: JSONObject.NULL)
 }
 
@@ -59,7 +60,7 @@ class VoiceService : Service() {
         super.onCreate()
         if (Build.VERSION.SDK_INT >= 26) {
             val channel = NotificationChannel("voice", "夏鱼洛语音监听", NotificationManager.IMPORTANCE_LOW)
-            channel.description = "本地监听唤醒词，点停止立即关闭；持续监听会增加耗电。"
+            channel.description = "无需唤醒词，完整识别文字用于只读问答；点停止立即关闭，持续监听增加耗电。"
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
@@ -121,7 +122,7 @@ class VoiceService : Service() {
     }
     private fun speak(text: String) {
         if (stopped) return
-        state("speaking", "正在回答，暂停识别以避免自唤醒。")
+        state("speaking", "正在回答，暂停识别以避免回声。")
         SpeechOutput.speak(this, text, "voice")
     }
     private fun listen() {
@@ -141,10 +142,10 @@ class VoiceService : Service() {
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, 8192))
             recorder = mic
             check(mic.state == AudioRecord.STATE_INITIALIZED)
-            val gate = WakeGate(); val buffer = ShortArray(3200)
+            val gate = ConversationGate(); val buffer = ShortArray(3200)
             mic.startRecording(); check(mic.recordingState == AudioRecord.RECORDSTATE_RECORDING)
             VoiceState.micRecording = true
-            state("listening", "正在本地监听“夏鱼洛”，前台/后台均由此服务运行。")
+            state("listening", "可以直接说话，无需唤醒词；前台/后台运行，可随时停止监听。")
             while (!stopped) {
                 if (SpeechOutput.active) {
                     mic.stop(); VoiceState.micRecording = false
@@ -155,7 +156,7 @@ class VoiceService : Service() {
                     Thread.sleep(300)
                     mic.startRecording(); check(mic.recordingState == AudioRecord.RECORDSTATE_RECORDING)
                     VoiceState.micRecording = true
-                    state("listening", "朗读结束，恢复本地唤醒监听。")
+                    state("listening", "朗读结束，可以接着说话，无需唤醒词。")
                     continue
                 }
                 check(!(getSystemService(AUDIO_SERVICE) as AudioManager).isMicrophoneMute) { "系统已关闭麦克风。" }
@@ -167,22 +168,15 @@ class VoiceService : Service() {
                 if (action == "ignore") continue
                 mic.stop(); VoiceState.micRecording = false
                 if (action == "stop") { handler.post { stopSelf() }; break }
-                val reply = when (action) {
-                    "sleep" -> "好的，等你再次呼唤夏鱼洛。"
-                    "wake" -> "我在，请说。"
-                    else -> {
-                        state("thinking", "已唤醒，正在进行 Codex 只读问答；编程/工具请用对应入口并遵循电脑设置。")
-                        val text = chat!!.ask(prompt); VoiceState.session = chat!!.session; text
-                    }
-                }
+                state("thinking", "正在进行 Codex 只读问答；编程/工具请用对应入口并遵循电脑设置。")
+                val reply = chat!!.ask(prompt); VoiceState.session = chat!!.session
                 speak(reply)
                 recognizer.reset()
-                if (action != "sleep") gate.resume()
                 if (!stopped) {
                     Thread.sleep(300) // Avoid the tail of our own audio.
                     mic.startRecording(); check(mic.recordingState == AudioRecord.RECORDSTATE_RECORDING)
                     VoiceState.micRecording = true
-                    state("listening", "正在本地监听；唤醒后 30 秒内可接着说。")
+                    state("listening", "可以接着说话，无需唤醒词；说“停止监听”可关闭麦克风。")
                 }
             }
         } catch (_: Exception) { if (!stopped) handler.post { fail() } }
