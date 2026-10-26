@@ -18,11 +18,14 @@
 
 ```powershell
 py -3.12 -m venv E:\XiayuluoVisionEnv
+E:\XiayuluoVisionEnv\Scripts\python -m pip install -c requirements-vision.lock setuptools
 E:\XiayuluoVisionEnv\Scripts\python -m pip install -c requirements-vision.lock --index-url https://download.pytorch.org/whl/cpu "torch==2.14.1+cpu"
 E:\XiayuluoVisionEnv\Scripts\python -m pip install -c requirements-vision.lock "numpy==2.4.2" "Pillow==12.3.0"
 ```
 
 PyTorch 从官方 CPU wheel 源获取，不下载 CUDA 工具链或预训练模型权重；NumPy 和 Pillow 是图像、张量及安全文件读写依赖。安装依赖需要联网，后续合成数据训练本身不需要模型 API 密钥。Linux 可使用相同依赖及训练命令，把 Python 路径换成对应虚拟环境的 `bin/python`。
+
+先从PyPI准备锁定的setuptools，再安装CPU Torch；PyTorch专用索引并不是完整的PyPI镜像，不能要求它提供全部构建工具版本。
 
 ## 训练和评测
 
