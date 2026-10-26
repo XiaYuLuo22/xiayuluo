@@ -48,6 +48,14 @@ def _identity(info):
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
 
 
+def _same_open_file(path_info, descriptor_info):
+    # CPython 3.12 on Windows exposes creation time as lstat().st_ctime,
+    # but change time as fstat().st_ctime. They are not interchangeable.
+    # Match the actual object and contents' metadata across the two APIs;
+    # _regular still checks EACH API's full signature before/after reading.
+    return _identity(path_info)[:4] == _identity(descriptor_info)[:4]
+
+
 def _path(path):
     path = Path(path)
     if '..' in path.parts:
@@ -113,12 +121,17 @@ def _regular(path, expected=None, maximum=None):
     descriptor = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
     try:
         opened = os.fstat(descriptor)
-        if _identity(opened) != _identity(before) or not stat.S_ISREG(opened.st_mode) or _linked(opened):
+        if not _same_open_file(before, opened) or not stat.S_ISREG(opened.st_mode) or _linked(opened):
             raise ValueError('Training backup input identity changed.')
+        _no_links(path)
         with os.fdopen(descriptor, 'rb', closefd=False) as stream:
             yield stream
-        if _identity(os.fstat(descriptor)) != _identity(before) or _identity(path.lstat()) != _identity(before):
+        after_descriptor, after_path = os.fstat(descriptor), path.lstat()
+        if (_identity(after_descriptor) != _identity(opened) or _identity(after_path) != _identity(before)
+                or not stat.S_ISREG(after_descriptor.st_mode) or _linked(after_descriptor)
+                or not stat.S_ISREG(after_path.st_mode) or _linked(after_path)):
             raise ValueError('Training data changed while reading its backup.')
+        _no_links(path)
     finally:
         os.close(descriptor)
 

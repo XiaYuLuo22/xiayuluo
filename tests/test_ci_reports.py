@@ -33,3 +33,12 @@ def test_non_windows_ci_command_can_report_an_escaped_specific_title(capsys):
     assert main([sys.executable, '-c', 'print("package not available"); raise SystemExit(1)'],
                 title='Vision dependency, failed\nnext:') == 1
     assert '::error title=Vision dependency%2C failed%0Anext%3A::package not available%0A' in capsys.readouterr().out
+
+
+def test_vision_runner_context_is_only_used_in_step_environment():
+    from pathlib import Path
+    workflow = (Path(__file__).parents[1] / '.github/workflows/vision-learning.yml').read_text()
+    # GitHub rejects runner.* in job-level env, before any test is executed.
+    before_steps, steps = workflow.split('    steps:', 1)
+    assert '${{ runner.' not in before_steps
+    assert 'XDG_DATA_HOME: ${{ runner.temp }}/xiayuluo-state' in steps

@@ -3,6 +3,7 @@ import hashlib
 import json
 from contextlib import contextmanager
 from pathlib import Path
+import os
 import stat
 from types import SimpleNamespace
 import zipfile
@@ -10,6 +11,80 @@ import zipfile
 import pytest
 
 from assistant import training_backup as backup
+
+
+def changed_stat(info, **changes):
+    values = {name: getattr(info, name) for name in
+              ('st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_ctime_ns', 'st_mode')}
+    values['st_file_attributes'] = getattr(info, 'st_file_attributes', 0)
+    return SimpleNamespace(**(values | changes))
+
+
+def test_windows_creation_and_change_time_difference_does_not_reject_unchanged_files(root, tmp_path, monkeypatch):
+    # Reproduce CPython 3.12 Windows lstat(creation time)/fstat(change time)
+    # on every platform. A fixed API difference is not a concurrent data edit.
+    actual = os.fstat
+    monkeypatch.setattr(backup.os, 'fstat', lambda descriptor: changed_stat(
+        actual(descriptor), st_ctime_ns=actual(descriptor).st_ctime_ns + 123456789))
+    expected = originals(root)
+    result = backup.snapshot(root)
+    assert backup.verify_backup(result['path'])['files'] == len(expected)
+    recovered = tmp_path / 'restored'
+    backup.restore_to_new_directory(result['path'], recovered)
+    assert originals(root) == originals(recovered) == expected
+    assert not list((root / 'backups').glob('*.tmp'))
+
+
+@pytest.mark.parametrize('field', ['st_ctime_ns', 'st_mtime_ns', 'st_size', 'st_ino', 'st_dev'])
+def test_descriptor_metadata_changes_during_read_are_still_rejected(tmp_path, monkeypatch, field):
+    path = tmp_path / 'sample'
+    path.write_bytes(b'unchanged data')
+    actual = os.fstat
+    calls = []
+    def descriptor_info(descriptor):
+        info = actual(descriptor)
+        calls.append(True)
+        if len(calls) > 1:
+            return changed_stat(info, **{field: getattr(info, field) + 1})
+        return info
+    monkeypatch.setattr(backup.os, 'fstat', descriptor_info)
+    with pytest.raises(ValueError, match='changed while reading'):
+        with backup._regular(path) as source:
+            assert source.read() == b'unchanged data'
+    assert path.read_bytes() == b'unchanged data'
+
+
+@pytest.mark.parametrize('field', ['st_ctime_ns', 'st_mtime_ns', 'st_size', 'st_ino', 'st_dev'])
+def test_path_metadata_changes_during_read_are_still_rejected(tmp_path, monkeypatch, field):
+    path = tmp_path / 'sample'
+    path.write_bytes(b'unchanged data')
+    actual = Path.lstat
+    changed = False
+    def path_info(value):
+        info = actual(value)
+        if value == path and changed:
+            return changed_stat(info, **{field: getattr(info, field) + 1})
+        return info
+    monkeypatch.setattr(Path, 'lstat', path_info)
+    with pytest.raises(ValueError, match='changed while reading'):
+        with backup._regular(path) as source:
+            assert source.read() == b'unchanged data'
+            changed = True
+    assert path.read_bytes() == b'unchanged data'
+
+
+@pytest.mark.parametrize('field', ['st_mtime_ns', 'st_size', 'st_ino', 'st_dev'])
+def test_cross_api_object_or_content_mismatch_is_not_ignored(tmp_path, monkeypatch, field):
+    path = tmp_path / 'sample'
+    path.write_bytes(b'original data')
+    actual = os.fstat
+    def mismatched(descriptor):
+        info = actual(descriptor)
+        return changed_stat(info, **{field: getattr(info, field) + 1})
+    monkeypatch.setattr(backup.os, 'fstat', mismatched)
+    with pytest.raises(ValueError, match='input identity changed'):
+        with backup._regular(path):
+            pytest.fail('A replaced or changed input was accepted')
 
 
 @pytest.fixture
