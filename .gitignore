@@ -1,6 +1,7 @@
 .venv/
 .env
 .assistant/
+.vision-learning/
 __pycache__/
 *.py[cod]
 .pytest_cache/

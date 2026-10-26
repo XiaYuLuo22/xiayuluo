@@ -13,6 +13,8 @@
 
 Python 依赖通过 `pyproject.toml` 和 `requirements.lock` 管理，包括 FastAPI、Uvicorn、HTTPX、python-dotenv，以及可选 PyAutoGUI、Pillow、pytest、Playwright；这些依赖通过发行包安装，没有复制它们的仓库。测试与运行需要的环境依赖保留在 `.venv` 中。
 
+独立的视觉动作学习实验使用官方 [PyTorch](https://github.com/pytorch/pytorch) 2.14.1+cpu（BSD风格许可及随wheel提供的第三方许可）和 [NumPy](https://github.com/numpy/numpy) 2.4.2（BSD-3-Clause），约束记录在 `requirements-vision.lock`。CPU wheel来自 `https://download.pytorch.org/whl/cpu`，NumPy由PyPI发行包安装；没有复制Neuro/Among Us的GPL代码、模型权重或训练数据，模型结构与合成图像生成器为本项目自行实现。实验代码与权重不加入普通App安装包；若以后分发训练运行环境，仍须保留所安装wheel中的完整许可证和第三方NOTICE，不能只用此说明代替。
+
 桌面 App 使用 [pywebview](https://github.com/r0x0r/pywebview) 6.2.1（BSD-3-Clause）；Windows 使用系统 Microsoft WebView2 和 pythonnet 适配层。构建工具为 [PyInstaller](https://github.com/pyinstaller/pyinstaller) 6.22.3，其 GPL 许可附带允许分发所构建程序的特殊例外。构建脚本会收集已安装依赖的许可证到发行包 `licenses/`，并保留此说明。WebView2 Runtime 通过微软的系统安装方式提供，未随源码包复制或修改。
 
 ## 离线语音（源码测试功能）

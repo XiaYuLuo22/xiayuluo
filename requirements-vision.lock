@@ -1,0 +1,15 @@
+# Optional offline-learning experiment only. Not a normal App dependency set.
+# Install torch from https://download.pytorch.org/whl/cpu, then numpy/Pillow
+# from PyPI, with this constraint file. Do not select a CUDA wheel implicitly.
+torch==2.14.1+cpu
+numpy==2.4.2
+Pillow==12.3.0
+filelock==3.32.3
+fsspec==2026.7.0
+networkx==3.6.1
+sympy==1.14.0
+mpmath==1.3.0
+Jinja2==3.1.6
+MarkupSafe==3.0.3
+typing-extensions==4.16.0
+setuptools==84.0.0
