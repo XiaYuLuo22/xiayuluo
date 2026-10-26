@@ -25,9 +25,9 @@ jobs:
           python-version: '3.12'
       - name: Install CPU-only training and test dependencies
         run: |
-          python -m pip install -c requirements-vision.lock --index-url https://download.pytorch.org/whl/cpu 'torch==2.14.1+cpu'
-          python -m pip install -c requirements-vision.lock numpy Pillow
-          python -m pip install -c requirements.lock -e '.[test]'
+          python tools/run_ci_command.py --annotation-title 'Vision Torch installation failed' python -m pip install -c requirements-vision.lock --index-url https://download.pytorch.org/whl/cpu 'torch==2.14.1+cpu'
+          python tools/run_ci_command.py --annotation-title 'Vision image dependency installation failed' python -m pip install -c requirements-vision.lock numpy Pillow
+          python tools/run_ci_command.py --annotation-title 'Vision test dependency installation failed' python -m pip install -c requirements.lock -e '.[test]'
       - run: python -m pytest -q tests/test_visual_learning_data.py tests/test_visual_learning_artifact.py tests/test_visual_learning_model.py tests/test_visual_learning_cli.py
       - name: Run the actual synthetic training and fresh held-out test
         run: |

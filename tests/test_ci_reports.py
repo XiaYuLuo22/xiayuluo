@@ -27,3 +27,9 @@ def test_ci_annotation_keeps_the_final_error_within_github_limit(capsys):
     annotation = capsys.readouterr().out.split('::error title=Windows build command failed::')[-1]
     assert annotation.endswith('ACTUAL FINAL ERROR%0A\n')
     assert len(annotation.encode('utf-8')) < 4096
+
+
+def test_non_windows_ci_command_can_report_an_escaped_specific_title(capsys):
+    assert main([sys.executable, '-c', 'print("package not available"); raise SystemExit(1)'],
+                title='Vision dependency, failed\nnext:') == 1
+    assert '::error title=Vision dependency%2C failed%0Anext%3A::package not available%0A' in capsys.readouterr().out
