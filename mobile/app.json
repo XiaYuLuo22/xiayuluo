@@ -2,14 +2,14 @@
   "expo": {
     "name": "夏鱼洛",
     "slug": "xiayuluo",
-    "version": "0.1.13",
+    "version": "0.1.14",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "scheme": "xiayuluo",
     "ios": { "bundleIdentifier": "com.xiayuluo.assistant", "supportsTablet": true },
     "android": {
       "package": "com.xiayuluo.assistant",
-      "versionCode": 14,
+      "versionCode": 15,
       "permissions": ["android.permission.REQUEST_INSTALL_PACKAGES"],
       "allowBackup": false,
       "blockedPermissions": [

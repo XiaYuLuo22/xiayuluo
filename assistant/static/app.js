@@ -144,6 +144,23 @@ $('#reply-speech-setting').addEventListener('change', guarded(toggleSpeech));
 $('#stop-speaking').addEventListener('click', () => void stopSpeech());
 
 let updateBusy = false;
+let cloudSyncBusy = false;
+function renderCloudSync(info) {
+  $('#cloud-sync-status').textContent = `${info.message || '尚未核实'}${info.last_sync ? ` 最近同步：${info.last_sync}` : ''}`;
+  $('#cloud-sync-now').disabled = cloudSyncBusy || !info.configured || info.phase === 'syncing' || info.phase === 'paused';
+}
+async function refreshCloudSync() {
+  $('#cloud-sync-card').hidden = !localTrainingOwner();
+  if ($('#cloud-sync-card').hidden || cloudSyncBusy) return;
+  try { renderCloudSync(await json('/api/cloud-sync')); }
+  catch (error) { $('#cloud-sync-status').textContent = `无法核实云同步状态：${error.message}`; $('#cloud-sync-now').disabled = true; }
+}
+$('#cloud-sync-now').addEventListener('click', guarded(async () => {
+  if (cloudSyncBusy || !localTrainingOwner()) return;
+  cloudSyncBusy = true; $('#cloud-sync-now').disabled = true;
+  try { renderCloudSync(await post('/api/cloud-sync', {})); }
+  finally { cloudSyncBusy = false; await refreshCloudSync(); }
+}));
 let trainingStatus = null, trainingBusy = false, trainingLoading = false;
 const localTrainingOwner = () => !!state.token && ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)
   && !location.pathname.startsWith('/mobile');
@@ -261,16 +278,24 @@ function renderProactive() {
   const probability = Number.isFinite(proactiveState.probability) ? Math.round(proactiveState.probability * 100) : 30;
   const cooldown = Number.isFinite(proactiveState.cooldown_seconds) ? proactiveState.cooldown_seconds : 600;
   const limit = Number.isFinite(proactiveState.max_analyses_per_hour) ? proactiveState.max_analyses_per_hour : 3;
+  const suggestions = Number.isFinite(proactiveState.max_notices_per_hour) ? proactiveState.max_notices_per_hour : 3;
   const provider = proactiveState.provider === 'codex' ? 'Codex · ChatGPT 登录' : proactiveState.provider === 'api' ? '所配置的视觉 API' : '当前所选引擎';
   const note = proactiveChanging ? '正在更新本机主动建议授权…'
     : !proactiveKnown ? '主动建议状态未核实，观察可能仍在运行；点击开关可请求关闭。'
-    : enabled ? `${proactiveState.message || '已开启前台窗口观察。'} 使用${provider}；每 ${interval} 秒有 ${probability}% 概率尝试分析，建议间隔至少 ${cooldown} 秒，每小时最多 ${limit} 次分析。${proactivePollError}`
+    : enabled ? `${proactiveState.message || '已开启前台窗口观察。'} 使用${provider}；每 ${interval} 秒检查活动变化，每小时最多 ${limit} 次分析；${probability}% 概率提出建议，间隔至少 ${cooldown} 秒，每小时最多 ${suggestions} 次建议。${proactivePollError}`
     : proactiveState.available ? '主动建议已关闭，不会为此功能读取屏幕。开启后才会间歇读取当前前台窗口。'
     : proactiveState.reason || '主动建议暂不可用；不会假装正在观察。';
   $('#proactive-note').textContent = note;
   $('#proactive-status').textContent = `${proactiveState.phase ? `状态：${proactiveState.phase} · ` : ''}${note}`;
   button.title = note;
+  if (!enabled) $('#activity-context').textContent = '活动感知已关闭；短期活动上下文已清除。';
 }
+$('#refresh-activity-context').addEventListener('click', guarded(async () => {
+  const result = await json('/api/proactive/context');
+  $('#activity-context').textContent = result.items?.length
+    ? result.items.map(item => `${item.category || '活动'}：${item.activity || ''}（约 ${Math.max(0, Math.round(item.age_seconds || 0))} 秒前）`).join('\n')
+    : '暂无有效的短期活动摘要；开启后也需要等待实际观察，不会补造历史。';
+}));
 function acceptProactive(info) {
   if (!info || typeof info.enabled !== 'boolean' || !Number.isInteger(info.generation)) throw new Error('主动建议状态格式无效。');
   if (proactiveKnown && info.generation < proactiveState.generation) return;
@@ -426,7 +451,7 @@ async function openView(view) {
   if (view === 'debug') debug.refresh();
   if (view === 'tasks') await renderTasks();
   if (view === 'devices') await renderDevices();
-  if (view === 'settings') await refreshTrainingProtection();
+  if (view === 'settings') await Promise.all([refreshTrainingProtection(), refreshCloudSync()]);
 }
 function setBusy(busy) {
   state.busy = busy;
@@ -951,6 +976,7 @@ document.addEventListener('keydown', (event) => { if ((event.ctrlKey || event.me
 $('#refresh-status').addEventListener('click', guarded(refreshStatus));
 $('#refresh-status').addEventListener('click', () => void refreshProactive());
 $('#refresh-status').addEventListener('click', () => void refreshTrainingProtection());
+$('#refresh-status').addEventListener('click', () => void refreshCloudSync());
 $('#add-memory').addEventListener('click', () => $('#memory-dialog').showModal());
 document.querySelectorAll('[data-close]').forEach((node) => node.addEventListener('click', () => $(`#${node.dataset.close}`).close()));
 $('#memory-form').addEventListener('submit', guarded(async (event) => {

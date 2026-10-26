@@ -73,7 +73,7 @@ class MemoryStore:
     def messages(self, session_id):
         with self.lock:
             return [dict(row) for row in self.db.execute(
-                "SELECT * FROM messages WHERE session_id=? ORDER BY id", (session_id,))]
+                "SELECT * FROM messages WHERE session_id=? ORDER BY created_at, id", (session_id,))]
 
     def append(self, session_id, role, content):
         if not content.strip():

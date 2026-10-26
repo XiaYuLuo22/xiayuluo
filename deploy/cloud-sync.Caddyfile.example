@@ -1,0 +1,11 @@
+# Replace the hostname, enable DNS, and provision the private server yourself.
+# Do not expose the Windows desktop /api or database directory.
+sync.example.invalid {
+    handle /sync/v1/* {
+        reverse_proxy 127.0.0.1:8877
+    }
+    handle /healthz {
+        reverse_proxy 127.0.0.1:8877
+    }
+    respond 404
+}

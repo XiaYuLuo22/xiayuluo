@@ -31,7 +31,7 @@ jobs:
           python tools/run_ci_command.py --annotation-title 'Vision image dependency installation failed' python -m pip install -c requirements-vision.lock numpy Pillow
           python tools/run_ci_command.py --annotation-title 'Vision test dependency installation failed' python -m pip install -c requirements.lock -e '.[test]'
           python -m pip check
-      - run: python -m pytest -q tests/test_visual_learning_data.py tests/test_visual_learning_artifact.py tests/test_visual_learning_model.py tests/test_visual_learning_cli.py
+      - run: python -m pytest -q tests/test_visual_learning_data.py tests/test_visual_learning_artifact.py tests/test_visual_learning_model.py tests/test_visual_learning_cli.py tests/test_visual_learning_demonstrations.py
       - name: Run the actual synthetic training and fresh held-out test
         env:
           XDG_DATA_HOME: ${{ runner.temp }}/xiayuluo-state

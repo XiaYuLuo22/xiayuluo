@@ -139,5 +139,7 @@ def load_policy(directory):
     model = VisualMousePolicy()
     shapes = {name: tuple(tensor.shape) for name, tensor in model.state_dict().items()}
     arrays, metadata = load_artifact(directory, shapes)
+    if metadata['model_type'] != SAFETY_METADATA['model_type'] or metadata['domain'] != SAFETY_METADATA['domain']:
+        raise ValueError('合成策略加载器只接受 synthetic-only 模型；示范模型须单独离线加载。')
     model.load_state_dict({name: torch.from_numpy(array) for name, array in arrays.items()}, strict=True)
     return model.eval(), metadata

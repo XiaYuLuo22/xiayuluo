@@ -75,21 +75,21 @@ def test_off_by_default_native_unavailable_and_strict_enable():
     assert not unavailable.status()['enabled']
 
 
-def test_probability_and_interval_are_checked_before_any_capture():
+def test_observation_interval_is_independent_of_notice_probability():
     samples = iter([0.9, 0.1])
     assistant, clock, planner, captures = fixture(random=lambda: next(samples))
     assistant.set_enabled(True)
     assert asyncio.run(assistant.tick()) is None
     clock.advance()
     assert asyncio.run(assistant.tick()) is None
-    assert not captures
-    clock.advance(119)
+    assert len(captures) == len(planner.calls) == 1
+    clock.advance(29)
     assert asyncio.run(assistant.tick()) is None
-    assert not captures
-    clock.advance(1)
+    assert len(captures) == 1
+    clock.advance(91)
     notice = asyncio.run(assistant.tick())
     assert notice == {'id': 1, 'generation': 1, 'kind': 'question', 'message': '需要我帮你整理一下思路吗？'}
-    assert len(captures) == len(planner.calls) == 1
+    assert len(captures) == len(planner.calls) == 2
     assert assistant.events(0) == [notice]
     assert assistant.events(1) == []
     assert 'png' not in assistant.status() and 'message' not in assistant.events(1)
@@ -114,7 +114,7 @@ def test_only_transient_text_is_kept_and_off_or_expiry_removes_notices():
     assert not any(isinstance(value, bytes) for value in vars(assistant).values())
 
 
-def test_cooldown_and_three_analysis_hourly_cap_survive_toggle():
+def test_cooldown_and_three_notice_hourly_cap_survive_toggle():
     assistant, clock, planner, captures = fixture()
     assistant.set_enabled(True)
     clock.advance()
@@ -122,16 +122,17 @@ def test_cooldown_and_three_analysis_hourly_cap_survive_toggle():
         assert asyncio.run(assistant.tick())['id'] == index + 1
         clock.advance(599)
         assert asyncio.run(assistant.tick()) is None
-        clock.advance(1)
-    assert len(planner.calls) == len(captures) == 3
+        clock.advance(120)
+    assert len(planner.calls) == len(captures) == 6
     assistant.set_enabled(False)
     assistant.set_enabled(True)
     clock.advance()
     assert asyncio.run(assistant.tick()) is None
-    assert len(captures) == 3
+    assert len(captures) == 7
     clock.advance(3600)
     assert asyncio.run(assistant.tick())['id'] == 4
-    assert assistant.status()['max_analyses_per_hour'] == 3
+    assert assistant.status()['max_analyses_per_hour'] == 12
+    assert assistant.status()['max_notices_per_hour'] == 3
 
 
 def test_identical_screen_and_model_noop_do_not_create_messages():
@@ -311,7 +312,9 @@ def test_api_sends_only_one_image_no_tools_and_no_other_conversations():
 
     frame = {'width': 100, 'height': 80, 'png': b'fixture'}
     planner = SuggestionPlanner(Settings(api_key='fixture'))
-    assert asyncio.run(planner.plan(frame, 'api', httpx.MockTransport(handler))) == response
+    planned = asyncio.run(planner.plan(frame, 'api', httpx.MockTransport(handler)))
+    assert {key: planned[key] for key in response} == response
+    assert planned['category'] == 'unknown' and planned['activity'] == ''
     assert len(records) == 1 and 'tools' not in records[0]
     assert len(records[0]['messages']) == 2
     content = records[0]['messages'][1]['content']

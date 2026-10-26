@@ -84,12 +84,23 @@ def _metadata(metadata):
     if not isinstance(metadata, dict):
         raise ValueError('Checkpoint metadata must be an object.')
     _json_value(metadata)
-    if (metadata.get('model_type') != 'synthetic-visual-mouse-v1'
-            or metadata.get('domain') != 'synthetic-only'
+    supported = {
+        'synthetic-visual-mouse-v1': 'synthetic-only',
+        'demonstration-visual-mouse-v1': 'user-demonstrations-offline',
+    }
+    if (not isinstance(metadata.get('model_type'), str) or metadata.get('model_type') not in supported
+            or metadata.get('domain') != supported.get(metadata.get('model_type'))
             or metadata.get('live_execution_allowed') is not False
             or metadata.get('image_size') != [128, 96]
             or any(type(size) is not int for size in metadata.get('image_size', []))):
-        raise ValueError('Checkpoint is not an approved synthetic-only model.')
+        raise ValueError('Checkpoint is not an approved offline-only model (synthetic-only or user-demonstrations-offline).')
+    if metadata.get('model_type') == 'demonstration-visual-mouse-v1':
+        goals = metadata.get('goals')
+        if (not isinstance(goals, list) or not 1 <= len(goals) <= 32
+                or any(not isinstance(goal, str) or not goal.strip() or goal != goal.strip()
+                       or len(goal) > 128 or any(ord(char) < 32 for char in goal) for goal in goals)
+                or len(set(goals)) != len(goals)):
+            raise ValueError('Demonstration model requires a bounded exact-match goal vocabulary.')
     encoded = json.dumps(metadata, ensure_ascii=False, allow_nan=False).encode('utf-8')
     if len(encoded) > MAX_MANIFEST_BYTES // 2:
         raise ValueError('Checkpoint metadata is too large.')

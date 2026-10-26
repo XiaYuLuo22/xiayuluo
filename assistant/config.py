@@ -22,6 +22,8 @@ class Settings:
     approval_mode: str = "auto"
     voice_autostart: bool = True
     training_dir: str = ''
+    cloud_sync_url: str = ''
+    cloud_sync_device_token: str = ''
 
     @classmethod
     def load(cls, env_file=None):
@@ -42,6 +44,8 @@ class Settings:
             approval_mode=os.getenv("APPROVAL_MODE", "auto").strip().lower(),
             voice_autostart=os.getenv("VOICE_AUTOSTART", "true").strip().lower() == "true",
             training_dir=os.getenv('ASSISTANT_TRAINING_DIR', '').strip(),
+            cloud_sync_url=os.getenv('CLOUD_SYNC_URL', '').strip(),
+            cloud_sync_device_token=os.getenv('CLOUD_SYNC_DEVICE_TOKEN', '').strip(),
         )
         url = urlsplit(settings.api_base)
         if url.scheme not in {"http", "https"} or not url.hostname or url.username:
@@ -58,4 +62,11 @@ class Settings:
             raise ValueError("ASSISTANT_PORT 必须在 1024–65535 之间。")
         if settings.training_dir and not Path(settings.training_dir).is_absolute():
             raise ValueError('ASSISTANT_TRAINING_DIR 必须是绝对路径，训练数据不能依赖安装目录。')
+        if bool(settings.cloud_sync_url) != bool(settings.cloud_sync_device_token):
+            raise ValueError('云同步需同时配置 CLOUD_SYNC_URL 和设备专用 CLOUD_SYNC_DEVICE_TOKEN；不要使用管理员密钥。')
+        if settings.cloud_sync_url:
+            cloud = urlsplit(settings.cloud_sync_url)
+            if (cloud.scheme != 'https' or not cloud.hostname or cloud.username or cloud.password
+                    or cloud.query or cloud.fragment or cloud.path not in ('', '/')):
+                raise ValueError('CLOUD_SYNC_URL 必须是不含凭据、查询参数或子路径的 HTTPS 服务根地址。')
         return settings

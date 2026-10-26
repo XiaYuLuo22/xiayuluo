@@ -27,7 +27,7 @@ assert workspace.name.startswith('xiayuluo-observation-')
 image = Path(args[args.index('--image') + 1])
 assert image.parent == workspace and image.is_file()
 schema = json.loads(Path(args[args.index('--output-schema') + 1]).read_text(encoding='utf-8'))
-assert set(schema['properties']) == {'kind', 'message'}
+assert set(schema['properties']) == {'kind', 'message', 'category', 'activity'}
 assert schema['additionalProperties'] is False
 instructions = next(value for value in args if value.startswith('developer_instructions='))
 assert '只读主动关怀观察器' in instructions and '不调用工具' in instructions
