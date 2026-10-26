@@ -6,6 +6,7 @@ on:
       - 'experiments/**'
       - 'tests/test_visual_learning*.py'
       - 'requirements-vision.lock'
+      - 'assistant/training*.py'
       - '.github/workflows/vision-learning.yml'
   workflow_dispatch:
 
@@ -18,6 +19,7 @@ jobs:
     timeout-minutes: 15
     env:
       PYTHONUTF8: '1'
+      XDG_DATA_HOME: ${{ runner.temp }}/xiayuluo-state
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,7 +35,9 @@ jobs:
       - run: python -m pytest -q tests/test_visual_learning_data.py tests/test_visual_learning_artifact.py tests/test_visual_learning_model.py tests/test_visual_learning_cli.py
       - name: Run the actual synthetic training and fresh held-out test
         run: |
-          python -m experiments.visual_mouse train --output dist/visual-learning/model --train-samples 4096 --eval-samples 512 --epochs 20 --seed 42
+          python -m experiments.visual_mouse train --data-dir "$RUNNER_TEMP/xiayuluo-training" --output "$RUNNER_TEMP/xiayuluo-training/models/demo" --train-samples 4096 --eval-samples 512 --epochs 20 --seed 42
+          mkdir -p dist/visual-learning
+          cp -R "$RUNNER_TEMP/xiayuluo-training/models/demo" dist/visual-learning/model
           python -m experiments.visual_mouse evaluate --model dist/visual-learning/model --samples 1024 --seed 314159 --report dist/visual-learning/test-report.json --require-learning
           python -m experiments.visual_mouse preview --model dist/visual-learning/model --output dist/visual-learning/preview.png
       - uses: actions/upload-artifact@v4

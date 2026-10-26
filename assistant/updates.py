@@ -1,6 +1,7 @@
 """Pinned Ed25519 release metadata, bounded HTTPS downloads and safe Windows staging."""
 import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
@@ -15,6 +16,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 import httpx
 
 from . import __version__
+from .training_storage import TRAINING_MARKER, assert_training_separate
 
 MAX_MANIFEST = 32768
 MAX_DOWNLOAD = 512 * 1024 * 1024
@@ -46,11 +48,14 @@ def verify_windows_package(raw, config):
         raise ValueError("离线更新包签名或内容无效，已拒绝更新。") from error
 
 
-def validate_install(install):
+def validate_install(install, protected_paths=()):
+    assert_training_separate(install, protected_paths)
     install = Path(install).resolve()
     if install.parent == install or not (install / "Xiayuluo.exe").is_file():
         raise ValueError("无法确定桌面 App 安装目录。")
-    if any((install / name).exists() for name in (".env", ".assistant", ".venv", ".git")):
+    user_data = {".env", ".assistant", ".venv", ".git", "training", ".vision-learning", TRAINING_MARKER}
+    if (any(os.path.lexists(install / name) for name in user_data)
+            or any(item.name.casefold() in user_data for item in install.iterdir())):
         raise ValueError("安装目录有用户数据，请先迁移至配置目录后再更新。")
     return install
 
@@ -173,9 +178,10 @@ def fetch_bytes(url, limit, *, destination=None, expected_hash=None, expected_si
             client.close()
 
 
-def extract_windows(archive, stage):
+def extract_windows(archive, stage, *, protected_paths=()):
     """Stage exclusively into a fresh sibling directory. Never overlay user files."""
     stage = Path(stage)
+    assert_training_separate(stage, protected_paths)
     stage.mkdir(mode=0o700)
     try:
         with zipfile.ZipFile(archive) as bundle:
@@ -194,6 +200,7 @@ def extract_windows(archive, stage):
                         or "\\" in original or "\0" in original or any(":" in part or part.endswith((".", " ")) for part in parts)
                         or stat.S_ISLNK(item.external_attr >> 16)
                         or any(part in {".env", ".assistant", ".venv", ".git", ".release-signing", ".android-signing", "release-private.pem"} for part in lower)
+                        or (len(lower) > 1 and lower[1] in {"training", ".vision-learning", TRAINING_MARKER})
                         or any(re.fullmatch(r"(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?", part) for part in lower)):
                     raise ValueError("更新包含不安全路径或用户数据。")
                 key = "/".join(lower)
@@ -222,9 +229,10 @@ def extract_windows(archive, stage):
 
 
 class Updates:
-    def __init__(self, cache, *, config=None):
+    def __init__(self, cache, *, config=None, protected_paths=()):
         self.config = config or json.loads(CONFIG.read_text(encoding="utf-8"))
         self.cache = Path(cache)
+        self.protected_paths = tuple(protected_paths)
         self.lock = Lock()
 
     def downloads(self):
@@ -250,7 +258,8 @@ class Updates:
             data = self.check()  # Do not accept client-supplied URLs or a stale cached manifest.
             if not data["available"]:
                 raise ValueError("没有更高版本，不允许降级或重装。")
-            install = validate_install(install)
+            install = validate_install(install, self.protected_paths)
+            assert_training_separate(self.cache, self.protected_paths)
             self.cache.mkdir(parents=True, exist_ok=True, mode=0o700)
             identifier = uuid.uuid4().hex
             archive = self.cache / f"{identifier}.zip"
@@ -259,7 +268,7 @@ class Updates:
                         expected_hash=asset["sha256"], expected_size=asset["size"])
             archive_owned = True
             stage = install.parent / f".{install.name}.update-{identifier}"
-            extract_windows(archive, stage)
+            extract_windows(archive, stage, protected_paths=self.protected_paths)
             return stage
         finally:
             if archive_owned and archive.is_file():
@@ -273,7 +282,8 @@ class Updates:
         archive, stage = None, None
         archive_owned, stage_owned = False, False
         try:
-            install = validate_install(install)
+            install = validate_install(install, self.protected_paths)
+            assert_training_separate(self.cache, self.protected_paths)
             package = Path(package)
             if not package.is_file() or package.suffix.lower() != ".xyupdate" or package.stat().st_size > MAX_DOWNLOAD + MAX_MANIFEST + 65536:
                 raise ValueError("请选择有效的 .xyupdate 签名更新包。")
@@ -304,7 +314,7 @@ class Updates:
                 if count != asset["size"] or digest.hexdigest() != asset["sha256"]:
                     raise ValueError("更新文件校验失败。")
             stage = install.parent / f".{install.name}.update-{identifier}"
-            extract_windows(archive, stage)
+            extract_windows(archive, stage, protected_paths=self.protected_paths)
             stage_owned = True
             info = json.loads((stage / "build-info.json").read_text(encoding="utf-8"))
             if info != {"version": data["version"], "platform": "windows-x64"}:

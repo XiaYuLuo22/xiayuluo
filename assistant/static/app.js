@@ -144,6 +144,53 @@ $('#reply-speech-setting').addEventListener('change', guarded(toggleSpeech));
 $('#stop-speaking').addEventListener('click', () => void stopSpeech());
 
 let updateBusy = false;
+let trainingStatus = null, trainingBusy = false, trainingLoading = false;
+const localTrainingOwner = () => !!state.token && ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)
+  && !location.pathname.startsWith('/mobile');
+function renderTrainingProtection(info) {
+  if (!info || typeof info.root !== 'string' || typeof info.ready !== 'boolean') throw new Error('训练数据保护状态格式无效，请更新或重新打开 App。');
+  trainingStatus = info;
+  $('#training-status').textContent = info.message || (info.ready ? '训练数据目录已就绪。' : '训练数据目录尚未就绪，请先检查本机存储。');
+  $('#training-ready').textContent = info.ready ? '就绪' : '需处理，更新前请先检查';
+  $('#training-root').textContent = info.root || '尚未设置';
+  const backup = info.last_backup;
+  $('#training-backup-path').textContent = backup?.path || '本次运行暂无成功备份记录';
+  $('#training-backup-size').textContent = backup && Number.isSafeInteger(backup.files) && Number.isSafeInteger(backup.bytes)
+    ? `${backup.files.toLocaleString('zh-CN')} 个文件 · ${backup.bytes.toLocaleString('zh-CN')} 字节` : '';
+  $('#backup-training').disabled = trainingBusy || !info.ready;
+}
+async function refreshTrainingProtection() {
+  const card = $('#training-protection');
+  card.hidden = !localTrainingOwner();
+  if (card.hidden || trainingBusy || trainingLoading) return;
+  trainingLoading = true; $('#backup-training').disabled = true;
+  try { renderTrainingProtection(await json('/api/training/status')); }
+  catch (error) {
+    trainingStatus = null;
+    $('#training-ready').textContent = '尚未核实';
+    $('#training-status').textContent = `无法读取训练数据保护状态：${error.message} 原有数据不会因此删除，请稍后点击“刷新状态”。`;
+    $('#backup-training').disabled = true;
+  } finally { trainingLoading = false; }
+}
+async function backupTraining() {
+  if (!localTrainingOwner() || trainingBusy || trainingLoading || !trainingStatus?.ready) return;
+  trainingBusy = true; $('#backup-training').disabled = true;
+  $('#backup-training').setAttribute('aria-busy', 'true');
+  $('#training-backup-result').textContent = '正在创建本地训练数据备份，请等待完成…';
+  try {
+    const info = await post('/api/training/backup', {});
+    renderTrainingProtection(info);
+    if (!info.last_backup?.path) throw new Error('服务未返回成功备份路径，请刷新状态核实；不会自动重试。');
+    $('#training-backup-result').textContent = `备份成功：${info.last_backup.path}`;
+  } catch (error) {
+    $('#training-backup-result').textContent = `备份未完成：${error.message} 请检查目录可写、剩余空间及文件占用后重试。不会删除或覆盖原有训练数据。`;
+  } finally {
+    trainingBusy = false;
+    $('#backup-training').setAttribute('aria-busy', 'false');
+    $('#backup-training').disabled = !trainingStatus?.ready;
+  }
+}
+$('#backup-training').addEventListener('click', () => void backupTraining());
 let voiceSession = null;
 let voiceRunning = false;
 async function refreshVoice() {
@@ -379,6 +426,7 @@ async function openView(view) {
   if (view === 'debug') debug.refresh();
   if (view === 'tasks') await renderTasks();
   if (view === 'devices') await renderDevices();
+  if (view === 'settings') await refreshTrainingProtection();
 }
 function setBusy(busy) {
   state.busy = busy;
@@ -902,6 +950,7 @@ document.querySelectorAll('[data-suggestion]').forEach((node) => node.addEventLi
 document.addEventListener('keydown', (event) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); guarded(newChat)(); } });
 $('#refresh-status').addEventListener('click', guarded(refreshStatus));
 $('#refresh-status').addEventListener('click', () => void refreshProactive());
+$('#refresh-status').addEventListener('click', () => void refreshTrainingProtection());
 $('#add-memory').addEventListener('click', () => $('#memory-dialog').showModal());
 document.querySelectorAll('[data-close]').forEach((node) => node.addEventListener('click', () => $(`#${node.dataset.close}`).close()));
 $('#memory-form').addEventListener('submit', guarded(async (event) => {

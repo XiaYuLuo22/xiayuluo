@@ -18,6 +18,7 @@ from .config import Settings
 from .automation import Automation
 from . import __version__
 from .updates import Updates
+from .training_storage import TrainingStorage
 from .voice_consent import VoiceConsents
 import httpx
 from .devices import Devices
@@ -148,6 +149,9 @@ def create_app(settings=None, *, memory=None, transport=None):
     app.state.install_update = None
     app.state.install_local_update = None
     app.state.updating = False
+    # Construction and status are read-only: opening the App never starts collection.
+    app.state.training_storage = TrainingStorage(settings.training_dir or None)
+    app.state.last_training_backup = None
     app.state.voice = None
     app.state.speech = None  # Only the owned native window initializes local TTS.
     app.state.native_window_open = False
@@ -181,7 +185,8 @@ def create_app(settings=None, *, memory=None, transport=None):
     app.state.proactive = proactive
     voice_consents = VoiceConsents(memory)
     app.state.voice_consents = voice_consents
-    updater = Updates(Path(settings.data_dir) / "updates")
+    updater = Updates(Path(settings.data_dir) / "updates",
+                      protected_paths=(app.state.training_storage.root,))
 
     @app.middleware("http")
     async def local_only(request, call_next):
@@ -506,6 +511,35 @@ def create_app(settings=None, *, memory=None, transport=None):
         except ValueError as error:
             raise HTTPException(409, str(error)) from error
 
+    def training_owner(request):
+        if voice_owner(request).startswith("phone:"):
+            raise HTTPException(403, "训练数据目录与备份仅在电脑本机管理。")
+
+    def training_status():
+        return {**app.state.training_storage.status(), "last_backup": app.state.last_training_backup}
+
+    async def backup_training(*, only_if_data=False):
+        try:
+            result = await asyncio.to_thread(app.state.training_storage.backup, only_if_data=only_if_data)
+            if result is not None:
+                app.state.last_training_backup = result
+            return result
+        except (OSError, ValueError) as error:
+            raise HTTPException(409, "训练数据备份失败；已保留原文件，请检查目录、空间或写入锁。更新已停止。") from error
+
+    @app.get("/api/training/status", dependencies=auth)
+    async def get_training_status(request: Request):
+        training_owner(request)
+        return await asyncio.to_thread(training_status)
+
+    @app.post("/api/training/backup", dependencies=auth)
+    async def backup_training_data(body: Payload, request: Request):
+        training_owner(request)
+        if app.state.updating:
+            raise HTTPException(409, "更新期间不能重复启动备份。")
+        await backup_training()
+        return await asyncio.to_thread(training_status)
+
     @app.post("/api/updates/install", dependencies=auth)
     async def install_update(body: UpdateRequest):
         if not body.confirm:
@@ -515,10 +549,14 @@ def create_app(settings=None, *, memory=None, transport=None):
         if active_sessions or app.state.updating:
             raise HTTPException(409, "请先完成或停止所有聊天、Codex 和更新任务。")
         app.state.updating = True
-        await proactive.interrupt_and_wait()
         try:
+            await proactive.interrupt_and_wait()
+            await backup_training(only_if_data=True)
             await asyncio.to_thread(app.state.install_update, updater)
             return {"restarting": True}
+        except HTTPException:
+            app.state.updating = False
+            raise
         except Exception as error:
             app.state.updating = False
             raise HTTPException(409, "更新未完成，当前安装未被覆盖，请稍后重试。") from error
@@ -530,12 +568,16 @@ def create_app(settings=None, *, memory=None, transport=None):
         if active_sessions or app.state.updating:
             raise HTTPException(409, "请先完成或停止所有聊天、Codex 和更新任务。")
         app.state.updating = True
-        await proactive.interrupt_and_wait()
         try:
+            await proactive.interrupt_and_wait()
+            await backup_training(only_if_data=True)
             restarting = await asyncio.to_thread(app.state.install_local_update, updater)
             if not restarting:
                 app.state.updating = False
             return {"restarting": bool(restarting), "cancelled": not restarting}
+        except HTTPException:
+            app.state.updating = False
+            raise
         except Exception as error:
             app.state.updating = False
             raise HTTPException(409, "离线更新未完成：请检查签名、版本和安装目录；原版与用户数据保留。") from error

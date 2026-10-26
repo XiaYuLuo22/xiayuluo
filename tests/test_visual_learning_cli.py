@@ -76,3 +76,28 @@ def test_preview_renders_synthetic_pixels_without_overwriting(model_directory, t
     before = output.read_bytes()
     assert main(args) == 1
     assert output.read_bytes() == before
+
+
+def test_training_publishes_to_managed_external_store(tmp_path, monkeypatch, capsys):
+    from assistant.training_storage import TrainingStorage
+    root = tmp_path / 'durable-training'
+    store = TrainingStorage(root, location_file=tmp_path / 'location.json')
+    monkeypatch.setattr('assistant.training_storage.TrainingStorage', lambda value=None: store)
+    assert main(['train', '--train-samples', '64', '--eval-samples', '8', '--epochs', '1']) == 0
+    result = json.loads(capsys.readouterr().out)
+    from pathlib import Path
+    output = Path(result['model_directory'])
+    assert output.parent == root / 'models'
+    assert (output / 'weights.npz').is_file() and (output / 'manifest.json').is_file()
+    backup = store.backup()
+    from assistant.training_backup import verify_backup
+    assert verify_backup(backup['path'])['files'] == 2
+
+
+def test_training_refuses_disposable_or_relative_output_before_writing(tmp_path, monkeypatch, capsys):
+    from assistant.training_storage import TrainingStorage
+    store = TrainingStorage(tmp_path / 'durable-training', location_file=tmp_path / 'location.json')
+    monkeypatch.setattr('assistant.training_storage.TrainingStorage', lambda value=None: store)
+    assert main(['train', '--output', 'dist/disposable-model', '--epochs', '1']) == 1
+    assert '持久训练目录' in capsys.readouterr().err
+    assert not store.root.exists()

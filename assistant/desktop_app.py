@@ -20,6 +20,7 @@ from .config import Settings
 from .server import create_app
 from .single_instance import SingleInstance
 from .speech import NativeSpeech
+from .training_storage import assert_training_separate, paths_overlap, resolve_training_root
 
 
 def configuration_directory():
@@ -150,7 +151,12 @@ def update_location_safe(install_dir, config_file, settings):
     protected = [Path(settings.data_dir), Path(config_file)]
     if settings.codex_workspace:
         protected.append(Path(settings.codex_workspace))
-    return not any(path.resolve().is_relative_to(install_dir.resolve()) for path in protected)
+    try:
+        protected.append(resolve_training_root(settings.training_dir or None))
+        assert_training_separate(install_dir, protected)
+        return not any(paths_overlap(path, install_dir) for path in protected)
+    except (OSError, ValueError):
+        return False
 
 
 def run_window(settings, config_file, *, webview_module=None, debug=False, instance=None):
@@ -181,6 +187,10 @@ def run_window(settings, config_file, *, webview_module=None, debug=False, insta
             install_dir = Path(sys.executable).resolve().parent
             # Never swap an installation containing configured memory/config data.
             if update_location_safe(install_dir, config_file, settings):
+                protected_paths = [str(service.app.state.training_storage.root), str(Path(settings.data_dir).absolute()),
+                                   str(Path(config_file).absolute())]
+                if settings.codex_workspace:
+                    protected_paths.append(str(Path(settings.codex_workspace).absolute()))
                 def restart_with_stage(stage):
                     # The old binary directory must be unlockable: run the helper outside it.
                     helper_dir = Path(mkdtemp(prefix="xiayuluo-update-"))
@@ -189,7 +199,7 @@ def run_window(settings, config_file, *, webview_module=None, debug=False, insta
                         shutil.copyfile(install_dir / "XiayuluoUpdater.exe", helper)
                         job = helper_dir / "job.json"
                         job.write_text(json.dumps({"pid": os.getpid(), "install": str(install_dir),
-                                                   "stage": str(stage)}), encoding="utf-8")
+                                                   "stage": str(stage), "protected_paths": protected_paths}), encoding="utf-8")
                         subprocess.Popen([str(helper), str(job)], cwd=helper_dir,
                                          creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
                     except Exception:

@@ -3,6 +3,17 @@ import pytest
 from assistant.config import Settings
 
 
+def test_training_directory_must_be_absolute_without_changing_memory(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('ASSISTANT_TRAINING_DIR', 'dist/training')
+    with pytest.raises(ValueError, match='ASSISTANT_TRAINING_DIR'):
+        Settings.load()
+    monkeypatch.setenv('ASSISTANT_TRAINING_DIR', str(tmp_path / 'training'))
+    settings = Settings.load()
+    assert settings.training_dir == str(tmp_path / 'training')
+    assert settings.data_dir == '.assistant'
+
+
 def test_voice_autostarts_by_default_and_local_optout_is_respected(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv('VOICE_AUTOSTART', raising=False)

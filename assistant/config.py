@@ -21,6 +21,7 @@ class Settings:
     chat_provider: str = "auto"
     approval_mode: str = "auto"
     voice_autostart: bool = True
+    training_dir: str = ''
 
     @classmethod
     def load(cls, env_file=None):
@@ -40,6 +41,7 @@ class Settings:
             chat_provider=os.getenv("CHAT_PROVIDER", "auto").strip().lower(),
             approval_mode=os.getenv("APPROVAL_MODE", "auto").strip().lower(),
             voice_autostart=os.getenv("VOICE_AUTOSTART", "true").strip().lower() == "true",
+            training_dir=os.getenv('ASSISTANT_TRAINING_DIR', '').strip(),
         )
         url = urlsplit(settings.api_base)
         if url.scheme not in {"http", "https"} or not url.hostname or url.username:
@@ -54,4 +56,6 @@ class Settings:
             raise ValueError("APPROVAL_MODE 只能为 auto 或 manual。")
         if not 1024 <= settings.port <= 65535:
             raise ValueError("ASSISTANT_PORT 必须在 1024–65535 之间。")
+        if settings.training_dir and not Path(settings.training_dir).is_absolute():
+            raise ValueError('ASSISTANT_TRAINING_DIR 必须是绝对路径，训练数据不能依赖安装目录。')
         return settings

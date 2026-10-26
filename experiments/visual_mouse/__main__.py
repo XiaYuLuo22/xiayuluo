@@ -9,7 +9,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='夏鱼洛视觉动作学习原型：仅合成界面，不操作真实鼠标。')
     commands = parser.add_subparsers(dest='command', required=True)
     learning = commands.add_parser('train')
-    learning.add_argument('--output', required=True, type=Path)
+    learning.add_argument('--output', type=Path, help='可选：持久训练目录 models 下的新绝对路径')
+    learning.add_argument('--data-dir', type=Path, help='可选：版本无关的持久数据根（绝对路径）')
     learning.add_argument('--train-samples', type=int, default=4096)
     learning.add_argument('--eval-samples', type=int, default=512)
     learning.add_argument('--epochs', type=int, default=20)
@@ -40,8 +41,16 @@ def main(argv=None):
         import torch
         torch.set_num_threads(2)
         if args.command == 'train':
-            result = train(args.output, train_samples=args.train_samples, eval_samples=args.eval_samples,
-                epochs=args.epochs, seed=args.seed, threads=args.threads, threshold=args.threshold)
+            from assistant.training_storage import TrainingStorage
+            storage = TrainingStorage(args.data_dir)
+            output = args.output or storage.model_path()
+            if not output.is_absolute() or not output.resolve().is_relative_to((storage.root / 'models').resolve()):
+                raise ValueError('模型输出必须位于持久训练目录的 models 下；请用 --data-dir 指定数据根，不能存进安装目录或 dist。')
+            storage.ensure()
+            result = train(output, train_samples=args.train_samples, eval_samples=args.eval_samples,
+                epochs=args.epochs, seed=args.seed, threads=args.threads, threshold=args.threshold,
+                publication_lock=storage.locked)
+            result = {'model_directory': str(output), **result}
         elif args.command == 'evaluate':
             if args.report is not None and args.report.exists():
                 raise ValueError('评测报告已存在，请选择新文件名。')

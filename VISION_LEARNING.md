@@ -29,15 +29,25 @@ PyTorch 从官方 CPU wheel 源获取，不下载 CUDA 工具链或预训练模�
 
 ## 训练和评测
 
-在已安装上述依赖的环境中，从仓库根目录运行：
+0.1.13 起，新训练产物保存到安装目录外的固定训练根，默认是 Windows `%LOCALAPPDATA%\Xiayuluo\training`，而不是安装到 E 盘就自动存在 E 盘。首次可以用 `ASSISTANT_TRAINING_DIR` 或 `--data-dir` 指定独立绝对目录；登记后配置冲突、原盘消失或格式损坏时停止操作，不自动切换为空目录。完整的保存、更新前备份与恢复说明见 [TRAINING_DATA.md](TRAINING_DATA.md)。
+
+在已安装上述依赖的环境中，从仓库根目录运行。以下示例是首次明确选择 E 盘独立训练根，输出位于该根的 `models/` 下：
 
 ```text
-python -m experiments.visual_mouse train --output dist/visual-learning/demo --train-samples 4096 --eval-samples 512 --epochs 20 --seed 42
-python -m experiments.visual_mouse evaluate --model dist/visual-learning/demo --samples 1024 --seed 314159 --report dist/visual-learning/test-report.json --require-learning
-python -m experiments.visual_mouse preview --model dist/visual-learning/demo --output dist/visual-learning/preview.png
+python -m experiments.visual_mouse train --data-dir E:/XiayuluoData/training --output E:/XiayuluoData/training/models/demo-001 --train-samples 4096 --eval-samples 512 --epochs 20 --seed 42
+python -m experiments.visual_mouse evaluate --model E:/XiayuluoData/training/models/demo-001 --samples 1024 --seed 314159 --report E:/XiayuluoData/training/models/demo-001/test-report.json --require-learning
+python -m experiments.visual_mouse preview --model E:/XiayuluoData/training/models/demo-001 --output E:/XiayuluoData/training/models/demo-001/preview.png
 ```
 
-输出目录必须是新目录，不覆盖已有模型。训练样本和评测样本应使用互不重叠的种子范围；不能把训练集命中率当成泛化能力。还应检查「同图换目标」的预测是否随目标改变，并与未训练模型对照，避免模型只记住常见位置或忽略任务目标。
+也可以不传位置参数，使用已登记位置或首次默认位置，并让 CLI 在 `models/` 下选择新输出目录、显示实际路径：
+
+```text
+python -m experiments.visual_mouse train --train-samples 4096 --eval-samples 512 --epochs 20 --seed 42
+```
+
+输出目录必须是新目录，不覆盖已有模型。根目录下 `datasets/`、`models/`、`checkpoints/`、`backups/` 分开管理；预留检查点目录不代表已实现断点续训。旧 `dist/visual-learning/`、`.vision-learning/` 文件不会自动迁移或删除，旧模型仍能按原路径评测和预测，但不自动纳入新根的备份。先保留旧文件，不要把移动目录或重训当作更新的一部分。
+
+训练样本和评测样本应使用互不重叠的种子范围；不能把训练集命中率当成泛化能力。还应检查「同图换目标」的预测是否随目标改变，并与未训练模型对照，避免模型只记住常见位置或忽略任务目标。
 
 `--require-learning`启用合成回归门槛：至少256张测试，目标存在成功率≥90%、建议精确率≥95%、缺失目标放弃率≥90%、至少32对同图换目标双成功率≥80%，错目标对原任务的成功率≤20%。未通过则返回失败而不假报学习完成；这些门槛不是允许控制真实桌面的凭据。
 
@@ -61,12 +71,14 @@ CPU训练4096张合成画面、20轮、种子42；训练后固定模型和0.45�
 ## 只预测，不执行
 
 ```text
-python -m experiments.visual_mouse predict --model dist/visual-learning/demo --image synthetic-example.png --goal "点击红色圆形"
+python -m experiments.visual_mouse predict --model E:/XiayuluoData/training/models/demo-001 --image synthetic-example.png --goal "点击红色圆形"
 ```
 
 `--image` 是本人明确提供的本地图片，不是自动截图入口。首次验证请使用生成器产生的合成界面；真实桌面图片属于模型未验证的输入分布，预测结果不可直接用于点击。预测只返回结构化结果，不执行动作；不支持、含糊或超出有限模板的目标应拒绝，而不是猜测你的意思。
 
 模型包由 `manifest.json` 和 `weights.npz` 组成，不使用 pickle 或 `torch.load` 加载任意对象。读取时需核对哈希、固定张量名称/形状、数值类型、有限数值和文件大小；格式检查不是模型能力或真实性认证。包内标识固定为 `domain: synthetic-only`、`live_execution_allowed: false`，不能通过改一个开关就声称适合控制真实桌面。
+
+电脑 App「设置 → 训练数据保护」可查看实际目录、状态并手动备份，最近成功备份的界面记录仅限本次运行，不是历史备份索引。App 内更新前若已有训练文件，先取得写锁并完成 SHA-256 校验快照；失败就停止本次更新。手动运行 exe 安装器只做目录隔离检查，不会启动 Python 自动备份，覆盖安装前请先手动备份。保留全部历史备份、不自动删除；同盘明文快照不能替代独立磁盘加密备份。CLI 可校验备份及恢复到不存在的绝对新目录，不覆盖原根、不自动切换登记，详细命令和 10,000 文件/8 GiB 限制见 [TRAINING_DATA.md](TRAINING_DATA.md)。
 
 ## 后续真实示范数据的边界
 

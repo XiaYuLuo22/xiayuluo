@@ -250,6 +250,12 @@ kbd { font-size: 8px; margin-left: auto; border: 1px solid #354557; border-radiu
 .settings-card p { font-size: 11px; line-height: 1.9; color: #829eaf; margin-top: 12px; }
 .settings-card pre { background: #0d151e; border: 1px solid #263846; padding: 14px; margin: 16px 0; border-radius: 4px; font: 10px/1.9 var(--mono); color: #8eb6be; max-height: 420px; overflow: auto; }
 .settings-card code { font-size: 10px; padding: 2px 4px; border-radius: 3px; color: #a8c7cd; background: #1c2c38; }
+.training-details { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px 16px; margin: 16px 0; font-size: 11px; line-height: 1.7; }
+.training-details dt { color: var(--muted); }
+.training-details dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.training-details small { display: block; color: var(--muted); margin-top: 4px; }
+#training-root, #training-backup-path { font-family: var(--mono); }
+#training-backup-result { overflow-wrap: anywhere; }
 .debug-toolbar { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); padding: 12px 15px; margin-bottom: 15px; }
 .debug-toolbar label { font-size: 10px; color: #93adbf; display: flex; align-items: center; gap: 11px; }
 .checkbox-label input { accent-color: var(--accent); }

@@ -11,6 +11,8 @@ import sys
 import time
 import uuid
 
+from .training_storage import TRAINING_MARKER, assert_training_separate
+
 
 def rename_with_retry(source, target):
     # PyInstaller's bootloader/antivirus may release executable handles slightly later.
@@ -25,11 +27,17 @@ def rename_with_retry(source, target):
             time.sleep(.2)
 
 
-def swap_install(install, stage, launch=subprocess.Popen):
+def swap_install(install, stage, launch=subprocess.Popen, *, protected_paths=()):
+    # Repeat the App's guard in the standalone helper; never trust a prior UI
+    # check or an update job whose configured paths have since changed.
+    assert_training_separate(install, protected_paths)
+    assert_training_separate(stage, protected_paths)
     install, stage = Path(install).resolve(), Path(stage).resolve()
+    user_data = {".env", ".assistant", ".venv", ".git", "training", ".vision-learning", TRAINING_MARKER}
     if (install.parent != stage.parent or not stage.name.startswith(f".{install.name}.update-")
             or not install.is_dir() or not (stage / "Xiayuluo.exe").is_file()
-            or any((install / name).exists() for name in (".env", ".assistant", ".venv", ".git"))):
+            or any(os.path.lexists(root / name) for root in (install, stage) for name in user_data)
+            or any(item.name.casefold() in user_data for root in (install, stage) for item in root.iterdir())):
         raise ValueError("更新目录无效或含用户数据。")
     # Inno Setup's per-user uninstaller must remain at its registered path.
     # Keep only its exact metadata files, never arbitrary old application files.
@@ -76,8 +84,12 @@ def main():
     job = Path(sys.argv[1])
     try:
         data = json.loads(job.read_text(encoding="utf-8"))
+        protected_paths = data.get("protected_paths", [])
+        if (type(protected_paths) is not list or len(protected_paths) > 16
+                or any(type(path) is not str or not path or len(path) > 32767 for path in protected_paths)):
+            raise ValueError("更新任务的数据保护路径无效。")
         wait_for_process(int(data["pid"]))
-        backup = swap_install(data["install"], data["stage"])
+        backup = swap_install(data["install"], data["stage"], protected_paths=protected_paths)
         job.with_suffix(".result.json").write_text(json.dumps({"ok": True, "backup": str(backup)}), encoding="utf-8")
     except Exception as error:
         job.with_suffix(".result.json").write_text(json.dumps({"ok": False, "error": str(error)}), encoding="utf-8")

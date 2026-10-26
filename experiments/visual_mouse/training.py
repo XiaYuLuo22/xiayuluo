@@ -1,6 +1,8 @@
 """CPU imitation experiment and held-out evaluation, without desktop access."""
 import math
+from contextlib import nullcontext
 import random
+import sys
 import time
 
 import numpy as np
@@ -116,7 +118,7 @@ def require_learning(report):
 
 
 def train(output, *, train_samples=4096, eval_samples=512, epochs=20, seed=42,
-          batch_size=64, learning_rate=.003, threshold=.45, threads=2):
+          batch_size=64, learning_rate=.003, threshold=.45, threads=2, publication_lock=None):
     if any(type(value) is not int for value in (train_samples, eval_samples, epochs, seed, batch_size, threads)):
         raise ValueError('训练计数和种子必须为整数。')
     if not (64 <= train_samples <= 16384 and 1 <= eval_samples <= 4096 and 1 <= epochs <= 100
@@ -161,7 +163,7 @@ def train(output, *, train_samples=4096, eval_samples=512, epochs=20, seed=42,
             optimizer.step()
             total += loss.item() * len(indexes)
         losses.append(total / train_samples)
-        print(f'epoch {epoch + 1}/{epochs} loss={losses[-1]:.5f}', flush=True)
+        print(f'epoch {epoch + 1}/{epochs} loss={losses[-1]:.5f}', file=sys.stderr, flush=True)
     validation = evaluate(model, count=eval_samples, seed=eval_seed, threshold=threshold)
     metadata = {**SAFETY_METADATA,
         'architecture': 'small-cnn-goal-embeddings-spatial-policy-v1',
@@ -172,6 +174,7 @@ def train(output, *, train_samples=4096, eval_samples=512, epochs=20, seed=42,
                      'torch': torch.__version__, 'numpy': np.__version__},
         'baseline': baseline, 'validation': validation,
         'scope': 'single synthetic image and finite color/shape/action goal; no real desktop validation'}
-    save_artifact(output, {name: tensor.detach().cpu().numpy().astype(np.float32)
-                          for name, tensor in model.state_dict().items()}, metadata)
+    with publication_lock() if publication_lock is not None else nullcontext():
+        save_artifact(output, {name: tensor.detach().cpu().numpy().astype(np.float32)
+                              for name, tensor in model.state_dict().items()}, metadata)
     return metadata
