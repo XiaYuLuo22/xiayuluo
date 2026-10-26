@@ -16,7 +16,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from assistant.updates import extract_windows, verify_manifest, verify_windows_package, version
-from tools.build_android import validate_bundle
+from tools.build_android import validate_bundle, validate_signed_apk
 
 
 def keygen(directory):
@@ -57,6 +57,10 @@ def manifest(args):
         if info != {"version": args.version, "platform": "windows-x64"}:
             raise ValueError("Windows build version does not match the signed release.")
     validate_bundle(args.android)
+    # Never trust an APK filename, source declaration, or a previous build job.
+    # Reverify the actual artifact before reading the release private key.
+    validate_signed_apk(args.android, args.android_build_tools,
+                        expected_version=args.version, expected_code=code)
     pem = args.key_file.read_bytes() if args.key_file else os.environ["XIAYULUO_RELEASE_PRIVATE_KEY"].encode()
     key = serialization.load_pem_private_key(pem, password=None)
     if not isinstance(key, Ed25519PrivateKey) or key.public_key().public_bytes_raw().hex() != config["public_key"]:
@@ -138,6 +142,8 @@ def main():
     signing.add_argument("--version", required=True)
     signing.add_argument("--windows", type=Path, required=True)
     signing.add_argument("--android", type=Path, required=True)
+    signing.add_argument("--android-build-tools", type=Path, required=True,
+                         help="Android SDK build-tools directory providing apksigner and aapt for artifact verification")
     signing.add_argument("--notes-file", type=Path, required=True)
     signing.add_argument("--key-file", type=Path)
     signing.add_argument("--output", type=Path, required=True)

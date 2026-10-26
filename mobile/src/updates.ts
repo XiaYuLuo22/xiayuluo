@@ -2,20 +2,23 @@ import { Platform } from 'react-native';
 import { fetch } from 'expo/fetch';
 import * as Application from 'expo-application';
 import * as FS from 'expo-file-system/legacy';
-import { File } from 'expo-file-system';
+import { File, FileMode } from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
 import config from './update-config.json';
 import appConfig from '../app.json';
-import { newer, verifyRelease, type Release } from './updateProtocol';
+import { fetchUpdateResource, manifestUrl, newer, verifyRelease, type Asset, type Release } from './updateProtocol';
+import { AndroidUpdateInstaller, type UpdateState } from './updateInstaller';
 
 export const currentVersion = Application.nativeApplicationVersion || appConfig.expo.version;
 const currentCode = Number(Application.nativeBuildVersion || appConfig.expo.android.versionCode);
-let downloading = false;
-export async function checkUpdate(): Promise<{ release: Release; available: boolean }> {
+export async function checkUpdate(signal?: AbortSignal): Promise<{ release: Release; available: boolean }> {
   const abort = new AbortController(), timer = setTimeout(() => abort.abort(), 20000);
+  const cancel = () => abort.abort();
+  signal?.addEventListener('abort', cancel, { once: true });
+  if (signal?.aborted) abort.abort();
   try {
     // This request is independent of the paired computer, and never carries its token.
-    const response = await fetch(config.manifest_url, { signal: abort.signal, credentials: 'omit' });
+    const response = await fetchUpdateResource(manifestUrl(config), abort.signal, fetch);
     if (response.status === 404) throw new Error('签名更新源尚未发布或当前不可访问，无法下载更新。请待发布源就绪后重试；当前版本保留，不会跳转网页。');
     if (!response.ok || !response.body) throw new Error('更新检查失败，请稍后重试。');
     const reader = response.body.getReader(), decoder = new TextDecoder();
@@ -31,43 +34,86 @@ export async function checkUpdate(): Promise<{ release: Release; available: bool
     } finally { reader.releaseLock(); }
     const release = verifyRelease(text, config);
     return { release, available: newer(release.version, currentVersion) && release.android_code > currentCode };
-  } finally { clearTimeout(timer); }
+  } catch (error) {
+    if (abort.signal.aborted) throw new Error(signal?.aborted ? '更新检查已取消。' : '更新检查超时，请稍后重试。');
+    throw error;
+  } finally { clearTimeout(timer); signal?.removeEventListener('abort', cancel); }
 }
 
-export async function installUpdate(expected: Release, progress: (text: string) => void): Promise<void> {
-  if (Platform.OS !== 'android') throw new Error('当前仅安卓安装包支持 App 内更新。');
-  if (downloading) throw new Error('已有更新正在下载。');
-  downloading = true;
-  let file: File | null = null, handedOff = false;
+async function downloadPackage(asset: Asset, signal: AbortSignal, progress: (received: number) => void): Promise<File> {
+  if (!FS.cacheDirectory) throw new Error('安卓更新缓存不可用；未更改当前应用或个人数据。');
+  const uri = `${FS.cacheDirectory}xiayuluo-update.apk`;
+  await FS.deleteAsync(uri, { idempotent: true });
+  const file = new File(uri);
+  const abort = new AbortController(), cancel = () => abort.abort();
+  signal.addEventListener('abort', cancel, { once: true });
+  if (signal.aborted) abort.abort();
+  let timedOut = false, finished = false;
+  const timer = setTimeout(() => { timedOut = true; abort.abort(); }, 10 * 60 * 1000);
   try {
-    const { release, available } = await checkUpdate();
-    if (!available || release.version !== expected.version || release.assets['android-arm64'].sha256 !== expected.assets['android-arm64'].sha256) throw new Error('发布版本已变化，请重新检查后确认。');
-    const asset = release.assets['android-arm64'];
-    // One dedicated cache file; never touch SecureStore or conversation storage.
-    const uri = `${FS.cacheDirectory}xiayuluo-update.apk`;
-    await FS.deleteAsync(uri, { idempotent: true }); file = new File(uri);
-    let tooLarge = false;
-    const download = FS.createDownloadResumable(asset.url, uri, {}, event => {
-      if (event.totalBytesWritten > asset.size || event.totalBytesExpectedToWrite > asset.size) {
-        tooLarge = true; void download.cancelAsync();
+    const response = await fetchUpdateResource(asset.url, abort.signal, fetch);
+    const declared = response.headers.get('content-length');
+    if (response.status !== 200 || !response.body || (declared !== null && (!/^\d+$/.test(declared) || Number(declared) !== asset.size))) {
+      await response.body?.cancel();
+      throw new Error('安装包下载响应无效或大小不符，请稍后重试。');
+    }
+    file.create();
+    const handle = file.open(FileMode.WriteOnly), reader = response.body.getReader();
+    let received = 0;
+    try {
+      while (true) {
+        if (abort.signal.aborted) throw new Error('更新下载已停止。');
+        const result = await reader.read();
+        if (result.done) break;
+        received += result.value.byteLength;
+        if (received > asset.size) throw new Error('安装包下载大小超限，已停止。');
+        await handle.writeBytes(result.value);
+        progress(received);
       }
-      progress(`正在下载 ${Math.min(100, Math.floor(event.totalBytesWritten * 100 / asset.size))}%`);
-    });
-    const timer = setTimeout(() => { void download.cancelAsync(); }, 10 * 60 * 1000);
-    let result;
-    try { result = await download.downloadAsync(); } finally { clearTimeout(timer); }
-    if (tooLarge || !result || result.status !== 200 || file.size !== asset.size) throw new Error('更新下载不完整或大小不符，请重试。');
-    progress('正在校验安装包…');
-    if (await file.digest('SHA-256') !== asset.sha256) throw new Error('安装包校验失败，已拒绝安装。');
-    const content = await FS.getContentUriAsync(uri);
+      if (received !== asset.size) throw new Error('安装包下载中断或不完整，请重试。');
+    } finally { await reader.cancel().catch(() => {}); handle.close(); }
+    finished = true;
+    return file;
+  } catch (error) {
+    if (timedOut) throw new Error('安装包下载超时，当前版本保留，请稍后重试。');
+    throw error;
+  } finally {
+    clearTimeout(timer); signal.removeEventListener('abort', cancel);
+    if (!finished && file.exists) file.delete();
+  }
+}
+
+const installer = new AndroidUpdateInstaller<File>({
+  check: checkUpdate,
+  download: downloadPackage,
+  verify: async (file, asset) => file.exists && file.size === asset.size && (await file.digest('SHA-256')).toLowerCase() === asset.sha256,
+  launch: async file => {
+    const content = await FS.getContentUriAsync(file.uri);
     await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
       data: content, type: 'application/vnd.android.package-archive', flags: 1,
     });
-    handedOff = true;
-    // Returning from this Intent does NOT prove installation succeeded.
-    progress('已交给系统安装器。若被拦截，请允许夏鱼洛安装未知应用，再点击更新重试；不要卸载旧版。');
-  } finally {
-    if (file && !handedOff && file.exists) file.delete();
-    downloading = false;
-  }
+  },
+  discard: async file => { if (file.exists) file.delete(); },
+});
+
+function requireAndroidApp() {
+  if (Platform.OS !== 'android') throw new Error('当前仅安卓安装包支持 App 内更新。');
+  if (Application.applicationId !== appConfig.expo.android.package) throw new Error('请使用夏鱼洛正式安卓 App；预览环境不能安装更新。');
+}
+export const getUpdateState = (): UpdateState => installer.status();
+export const subscribeUpdateState = (listener: (state: UpdateState) => void) => installer.subscribe(listener);
+export const cancelUpdate = () => installer.cancel();
+export async function installUpdate(expected: Release, progress: (text: string) => void): Promise<void> {
+  requireAndroidApp();
+  const unsubscribe = installer.subscribe(state => progress(state.message));
+  try { await installer.install(expected); } finally { unsubscribe(); }
+}
+export async function reopenInstaller(): Promise<void> { requireAndroidApp(); await installer.reopen(); }
+export async function openInstallPermissionSettings(): Promise<void> {
+  requireAndroidApp();
+  try {
+    await IntentLauncher.startActivityAsync('android.settings.MANAGE_UNKNOWN_APP_SOURCES', {
+      data: `package:${appConfig.expo.android.package}`,
+    });
+  } catch { throw new Error('无法打开安装权限设置，请在安卓设置中允许夏鱼洛安装未知应用，然后再次打开安装器。'); }
 }

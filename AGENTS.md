@@ -1,5 +1,8 @@
 # 开发约定
 
+- 0.1.15/code16 用户要求完善App内在线直更：Windows Updates.progress本机auth API展示备份/下载/校验/重启，在线也验证build-info；新helper使用新签名包中的二进制、nonce+version+本地服务/原生window shown ACK，超时/提前退出停止自己Popen持有的进程句柄并尝试回滚，不使用taskkill/PID猜测；子进程锁阻止回滚时保留旧版备份并报错，不宣称成功。Android显式取消、验证缓存重开系统安装器、权限入口、卸载组件不setState，不把Intent返回当安装成功；固定匿名HTTPS发布源、逐跳限制、大小/hash/签名和系统安装校验不放宽。训练备份/目录隔离继续保留。
+- 发布preflight新增workflow_dispatch check_only，跳过标签要求但仅检查三项原Secrets存在性，所有build/publish被条件禁止；实际run40276737781明确缺XIAYULUO_RELEASE_PRIVATE_KEY、XIAYULUO_ANDROID_KEYSTORE_BASE64、XIAYULUO_ANDROID_STORE_PASSWORD。必须由所有者安全配置原材料，不上传私钥、不生成替代、不建新tag绕过。正式发布前强制require-existing-signing与APK实际证书/包名/versionCode、Windows build-info复核；发布后匿名下载完整双端资产校验，失败将本次新Release退回草稿。源码/单端构建/受控测试不等于在线直更上线或真机覆盖升级验收，见UPDATES.md。
+
 - 2026-10-26 最新要求覆盖下方历史状态：所有者已自行公开仓库（不是代理代为更改），手机不需鼠标遥控，只通过对话/编程指令让电脑在既有工作区与执行策略中处理。没有云服务器，不默认创建托管账号、部署服务、上传私人数据或消费云资源；GitHub公开源码、签名Release更新、独立云同步、显式加密备份是不同能力，模块与本地测试不能冒称已上线。继续保留本机/手机配对、CLI沙箱、系统授权及工作区校验。
 - 本轮目标0.1.14/code15：可自部署 cloud_sync 单私人所有者HTTPS文本服务、设备哈希token/撤销、事件ID/版本/增量游标/tombstone/冲突保留及有栅栏租约队列；电脑可选 CLOUD_SYNC_URL+CLOUD_SYNC_DEVICE_TOKEN，空值完全不联网，MemoryCloudBridge只同步会话/文本消息/非临时记忆，不执行Codex或鼠标、不重放append产生记忆。手机TS离线引擎尚未接正式App云UI与存储适配，云任务尚未接本机执行器，不宣传完整云同步可用、已部署、多用户SaaS或E2EE。配置/状态不能泄露token、原始服务器错误、APIkeys/Codex凭据/活动截图/训练数据，明文文本库需本人可信部署与加密备份，见CLOUD_SYNC.md。
 - 用户随后明确允许聊天/训练数据使用公开GitHub，本轮仅提供本人显式选择一致性导出/已验证训练ZIP的本机AES-256-GCM小文件加密备份与显式上传；不自动上传App数据。单包明文上限16MiB，密钥只本机新建不覆盖、独立私有目录保存，不上传密钥/凭据/签名材料；固定GitHub Contents API只新建随机backups/文件，不重定向、不覆盖。公开历史/clone/fork不可保证删除，密钥丢失无法恢复、日后泄漏可暴露历史；不是完整训练云盘、实时同步、自动备份或App内训练上传。没有上传真实私人数据。

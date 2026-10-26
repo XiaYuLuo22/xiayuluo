@@ -55,6 +55,8 @@ jobs:
         shell: pwsh
       - run: python -m pytest -q tests/test_updates.py tests/test_offline_updates.py tests/test_update_ownership.py tests/test_training_storage.py tests/test_training_backup.py tests/test_training_api.py tests/test_training_updates.py tests/test_training_data_cli.py tests/test_packaged_smoke.py tests/test_desktop_app.py tests/test_single_instance.py tests/test_mouse.py tests/test_mouse_api.py tests/test_proactive.py tests/test_proactive_api.py tests/test_mobile.py tests/test_codex_chat.py tests/test_voice.py tests/test_speech.py tests/test_speech_api.py tests/test_voice_consent.py tests/test_automation.py tests/test_release_checks.py tests/test_release_android.py
       - run: python tools/prepare_voice_model.py
+      - name: Validate online update startup and publication gates
+        run: python tools/run_ci_command.py python -m pytest -q tests/test_online_update_completion.py tests/test_release_publish_validation.py
       - name: Validate activity, cloud sync and encrypted backup boundaries
         run: python tools/run_ci_command.py python -m pytest -q tests/test_activity_context.py tests/test_activity_api.py tests/test_cloud_client.py tests/test_cloud_replica.py tests/test_cloud_bridge.py tests/test_cloud_runtime.py tests/test_cloud_sync_server.py tests/test_cloud_end_to_end.py tests/test_github_backup.py
       - run: python tools/run_ci_command.py python tools/build_desktop.py --installer
@@ -107,7 +109,7 @@ jobs:
       - name: Install locked SDK components and build the signed APK
         run: |
           sdkmanager 'platforms;android-37' 'build-tools;37.0.0' 'ndk;27.1.12297006' 'cmake;3.22.1'
-          python tools/build_android.py --sdk "$ANDROID_HOME" --java "$JAVA_HOME" --java17 "$JAVA_HOME_17_X64" --signing-dir "$RUNNER_TEMP/xiayuluo-android-signing" --output "$RUNNER_TEMP/Xiayuluo-Android-arm64.apk"
+          python tools/build_android.py --sdk "$ANDROID_HOME" --java "$JAVA_HOME" --java17 "$JAVA_HOME_17_X64" --signing-dir "$RUNNER_TEMP/xiayuluo-android-signing" --require-existing-signing --output "$RUNNER_TEMP/Xiayuluo-Android-arm64.apk"
       - uses: actions/upload-artifact@v4
         with:
           name: android-update
@@ -126,6 +128,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - name: Prepare independent APK verification tools
+        run: sdkmanager 'build-tools;37.0.0'
       - uses: actions/download-artifact@v4
         with:
           path: release-assets
@@ -134,10 +143,14 @@ jobs:
       - name: Sign the complete release manifest
         env:
           XIAYULUO_RELEASE_PRIVATE_KEY: ${{ secrets.XIAYULUO_RELEASE_PRIVATE_KEY }}
-        run: python tools/release.py manifest --version "${GITHUB_REF_NAME#v}" --windows release-assets/Xiayuluo-Windows.zip --android release-assets/Xiayuluo-Android-arm64.apk --notes-file RELEASE_NOTES.md --output release-assets/update.json
+        run: python tools/release.py manifest --version "${GITHUB_REF_NAME#v}" --windows release-assets/Xiayuluo-Windows.zip --android release-assets/Xiayuluo-Android-arm64.apk --android-build-tools "$ANDROID_HOME/build-tools/37.0.0" --notes-file RELEASE_NOTES.md --output release-assets/update.json
       - name: Publish only after every build and signature succeeds
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "夏鱼洛 $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md release-assets/*
           gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+          if ! python tools/verify_published_update.py --version "${GITHUB_REF_NAME#v}" --android-build-tools "$ANDROID_HOME/build-tools/37.0.0"; then
+            gh release edit "$GITHUB_REF_NAME" --draft=true
+            exit 1
+          fi

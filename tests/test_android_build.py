@@ -33,6 +33,46 @@ def test_existing_key_is_not_replaced_if_password_is_lost(tmp_path):
     assert not (tmp_path / 'password').exists()
 
 
+@pytest.mark.parametrize('present', [(), ('key',), ('password',)])
+def test_release_signing_never_creates_identity_when_incomplete(tmp_path, monkeypatch, present):
+    directory = tmp_path / 'existing-signing'
+    if present:
+        directory.mkdir()
+    if 'key' in present:
+        (directory / 'xiayuluo-private.p12').write_bytes(b'preserved-key')
+    if 'password' in present:
+        (directory / 'password').write_text('fixture-private-password-123456')
+    before = {file.name: file.read_bytes() for file in directory.iterdir()} if directory.exists() else None
+    monkeypatch.setattr('tools.build_android.subprocess.run', lambda *args, **kwargs: pytest.fail('No key generation allowed'))
+    with pytest.raises(ValueError, match='restore'):
+        signing(directory, Path('/fixture/keytool'), require_existing=True)
+    assert ({file.name: file.read_bytes() for file in directory.iterdir()} if directory.exists() else None) == before
+
+
+def test_release_signing_reuses_only_existing_key_and_password(tmp_path, monkeypatch):
+    key = tmp_path / 'xiayuluo-private.p12'
+    key.write_bytes(b'fixture-existing-key')
+    (tmp_path / 'password').write_text('fixture-private-password-123456')
+    monkeypatch.setattr('tools.build_android.subprocess.run', lambda *args, **kwargs: pytest.fail('No key generation allowed'))
+    selected, password = signing(tmp_path, Path('/fixture/keytool'), require_existing=True)
+    assert selected == key and password == 'fixture-private-password-123456'
+    assert key.read_bytes() == b'fixture-existing-key'
+
+
+def test_release_signing_refuses_linked_identity(tmp_path):
+    original = tmp_path / 'original'
+    original.mkdir()
+    (original / 'xiayuluo-private.p12').write_bytes(b'fixture-key')
+    (original / 'password').write_text('fixture-private-password-123456')
+    linked = tmp_path / 'alias'
+    try:
+        linked.symlink_to(original, target_is_directory=True)
+    except OSError:
+        pytest.skip('Links unavailable on this platform')
+    with pytest.raises(ValueError, match='links'):
+        signing(linked, Path('/fixture/keytool'), require_existing=True)
+
+
 def test_missing_bundle_and_accidental_private_data_cannot_be_distributed(tmp_path):
     def apk(name, entries):
         file = tmp_path / name

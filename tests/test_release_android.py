@@ -64,6 +64,15 @@ def test_public_verification_needs_no_keystore_password(monkeypatch):
     assert not any("fixture-never" in str(command) for command, _ in calls)
 
 
+def test_public_apk_tools_never_inherit_release_or_model_credentials(monkeypatch):
+    calls = tools(monkeypatch)
+    private_names = ('XIAYULUO_RELEASE_PRIVATE_KEY', 'XIAYULUO_ANDROID_KEYSTORE_BASE64',
+                     'GH_TOKEN', 'GITHUB_TOKEN', 'OPENAI_API_KEY', 'ASSISTANT_MODEL_KEY')
+    for name in private_names: monkeypatch.setenv(name, 'private-fixture-never-forward')
+    verify()
+    assert all(not any(name in options['env'] for name in private_names) for _, options in calls)
+
+
 @pytest.mark.parametrize("signature", [
     SIGNATURE.replace(ANDROID_CERTIFICATE_SHA256, "0" * 64),
     SIGNATURE.replace(ANDROID_CERTIFICATE_SHA256, "not-a-digest"),

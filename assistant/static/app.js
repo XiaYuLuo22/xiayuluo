@@ -383,6 +383,28 @@ $('#download-update').addEventListener('click', async () => {
   if (result?.available && result.install_supported) await installSignedUpdate();
 });
 let lastUpdateCheck = 0;
+let updateProgressGeneration = 0;
+function watchUpdateProgress() {
+  const generation = ++updateProgressGeneration;
+  let busy = false;
+  const poll = async () => {
+    if (busy || generation !== updateProgressGeneration || !updateBusy) return;
+    busy = true;
+    try {
+      const info = await json('/api/updates/progress');
+      if (generation !== updateProgressGeneration || !updateBusy) return;
+      const received = Number.isSafeInteger(info.received_bytes) ? info.received_bytes : 0;
+      const total = Number.isSafeInteger(info.total_bytes) ? info.total_bytes : 0;
+      const percent = total > 0 ? ` ${Math.min(100, Math.floor(received * 100 / total))}%` : '';
+      if (info.phase !== 'idle' && typeof info.message === 'string' && info.message) {
+        $('#update-status').textContent = info.message + (info.phase === 'downloading' ? percent : '');
+      }
+    } catch { /* Older hosts or brief reloads keep the honest foreground message. */ }
+    finally { busy = false; }
+  };
+  const timer = setInterval(() => void poll(), 1000);
+  return () => { if (generation === updateProgressGeneration) ++updateProgressGeneration; clearInterval(timer); };
+}
 async function checkForUpdates(automatic = false) {
   if (updateBusy || !state.token) return;
   if (automatic && (!state.status?.runtime.update_supported || document.hidden || state.busy)) return;
@@ -416,10 +438,11 @@ async function installSignedUpdate() {
   if (updateBusy || state.busy) return toast('请先完成或停止当前任务。');
   if (!approveLocally('下载并校验新版本，然后退出并重启夏鱼洛？配置、聊天和四级记忆保留，安装位置不变。')) return;
   updateBusy = true; $('#install-update').disabled = true; $('#check-update').disabled = true; $('#download-update').disabled = true;
-  $('#update-status').textContent = '正在下载并校验，请勿关闭 App；完成后自动重启…';
-  try { await stopSpeech(true); await post('/api/updates/install', { confirm: true }); $('#update-status').textContent = '校验通过，正在重启安装…'; }
+  $('#update-status').textContent = '正在备份训练数据并准备下载，请勿关闭 App…';
+  const stopProgress = watchUpdateProgress();
+  try { await stopSpeech(true); await post('/api/updates/install', { confirm: true }); stopProgress(); $('#update-status').textContent = '安装包已校验，正在重启安装；新版启动成功后才能确认更新完成。'; }
   catch (error) { $('#update-status').textContent = error.message; }
-  finally { updateBusy = false; $('#install-update').disabled = false; $('#check-update').disabled = false; $('#download-update').disabled = false; }
+  finally { stopProgress(); updateBusy = false; $('#install-update').disabled = false; $('#check-update').disabled = false; $('#download-update').disabled = false; }
 }
 $('#install-update').addEventListener('click', installSignedUpdate);
 $('#import-update').addEventListener('click', async () => {
@@ -427,11 +450,13 @@ $('#import-update').addEventListener('click', async () => {
   if (!approveLocally('选择下载好的签名更新包，校验后退出并重启夏鱼洛？配置和四级记忆保留。')) return;
   updateBusy = true; $('#import-update').disabled = true; $('#check-update').disabled = true;
   $('#update-status').textContent = '请选择 .xyupdate 签名更新包；校验期间请勿关闭 App…';
+  const stopProgress = watchUpdateProgress();
   try {
     const result = await post('/api/updates/import', { confirm: true });
+    stopProgress();
     $('#update-status').textContent = result.cancelled ? '已取消，当前版本未改变。' : '签名和文件校验通过，正在重启更新…';
   } catch (error) { $('#update-status').textContent = error.message; }
-  finally { updateBusy = false; $('#import-update').disabled = !state.status?.runtime.update_supported; $('#check-update').disabled = false; }
+  finally { stopProgress(); updateBusy = false; $('#import-update').disabled = !state.status?.runtime.update_supported; $('#check-update').disabled = false; }
 });
 
 function setMode(mode) {

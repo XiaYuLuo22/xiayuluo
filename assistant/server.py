@@ -152,6 +152,7 @@ def create_app(settings=None, *, memory=None, transport=None):
     app.state.install_update = None
     app.state.install_local_update = None
     app.state.updating = False
+    app.state.update_phase = 'idle'
     # Construction and status are read-only: opening the App never starts collection.
     app.state.training_storage = TrainingStorage(settings.training_dir or None)
     app.state.last_training_backup = None
@@ -513,6 +514,22 @@ def create_app(settings=None, *, memory=None, transport=None):
         except ValueError as error:
             raise HTTPException(409, str(error)) from error
 
+    @app.get("/api/updates/progress", dependencies=auth)
+    async def update_progress(request: Request):
+        if voice_owner(request).startswith('phone:'):
+            raise HTTPException(403, '电脑更新状态仅在本机查看。')
+        result = updater.progress()
+        phase = app.state.update_phase
+        messages = {
+            'backing_up': '正在备份并校验训练数据；失败会停止更新，原文件保留。',
+            'restarting': '安装包已校验，正在交给更新助手重启；尚未确认新版启动成功。',
+            'cancelled': '已取消更新，当前版本未改变。',
+            'error': '更新未完成；原版和用户数据保留，请检查错误后重试。',
+        }
+        if phase in messages:
+            result = {**result, 'phase': phase, 'message': messages[phase]}
+        return {**result, 'updating': app.state.updating}
+
     @app.get("/api/updates/downloads", dependencies=auth)
     async def update_download_pages():
         try:
@@ -573,18 +590,23 @@ def create_app(settings=None, *, memory=None, transport=None):
         if active_sessions or app.state.updating:
             raise HTTPException(409, "请先完成或停止所有聊天、Codex 和更新任务。")
         app.state.updating = True
+        app.state.update_phase = 'backing_up'
         try:
             await proactive.interrupt_and_wait()
             await app.state.cloud_sync.pause()
             await backup_training(only_if_data=True)
+            app.state.update_phase = 'preparing'
             await asyncio.to_thread(app.state.install_update, updater)
+            app.state.update_phase = 'restarting'
             return {"restarting": True}
         except HTTPException:
             app.state.updating = False
+            app.state.update_phase = 'error'
             await app.state.cloud_sync.start()
             raise
         except Exception as error:
             app.state.updating = False
+            app.state.update_phase = 'error'
             await app.state.cloud_sync.start()
             raise HTTPException(409, "更新未完成，当前安装未被覆盖，请稍后重试。") from error
 
@@ -595,21 +617,26 @@ def create_app(settings=None, *, memory=None, transport=None):
         if active_sessions or app.state.updating:
             raise HTTPException(409, "请先完成或停止所有聊天、Codex 和更新任务。")
         app.state.updating = True
+        app.state.update_phase = 'backing_up'
         try:
             await proactive.interrupt_and_wait()
             await app.state.cloud_sync.pause()
             await backup_training(only_if_data=True)
+            app.state.update_phase = 'preparing'
             restarting = await asyncio.to_thread(app.state.install_local_update, updater)
+            app.state.update_phase = 'restarting' if restarting else 'cancelled'
             if not restarting:
                 app.state.updating = False
                 await app.state.cloud_sync.start()
             return {"restarting": bool(restarting), "cancelled": not restarting}
         except HTTPException:
             app.state.updating = False
+            app.state.update_phase = 'error'
             await app.state.cloud_sync.start()
             raise
         except Exception as error:
             app.state.updating = False
+            app.state.update_phase = 'error'
             await app.state.cloud_sync.start()
             raise HTTPException(409, "离线更新未完成：请检查签名、版本和安装目录；原版与用户数据保留。") from error
 

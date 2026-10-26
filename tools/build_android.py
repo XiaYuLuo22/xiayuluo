@@ -19,10 +19,21 @@ ANDROID_PACKAGE = "com.xiayuluo.assistant"
 ANDROID_CERTIFICATE_SHA256 = "bef9a3315531035f91362a72fd3012198304fd83d21d07009d67fd1df90ac96a"
 
 
-def signing(directory, keytool):
-    directory = Path(directory).resolve()
-    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+def signing(directory, keytool, *, require_existing=False):
+    directory = Path(directory).absolute()
     keystore, password_file = directory / "xiayuluo-private.p12", directory / "password"
+    if require_existing:
+        # Release builds may only reuse the existing identity. Do this before
+        # creating a directory, password, or running keytool.
+        for path in (directory, *directory.parents, keystore, password_file):
+            if path.is_symlink() or (path.exists() and getattr(path.lstat(), 'st_file_attributes', 0) & 0x400):
+                raise ValueError("Existing release signing files must not use links or junctions.")
+        if (not directory.is_dir() or not keystore.is_file() or not password_file.is_file()
+                or not 1 <= keystore.stat().st_size <= 1024 * 1024
+                or not 20 <= password_file.stat().st_size <= 4096):
+            raise ValueError("Existing Android signing key and password are required; restore them, never generate a replacement.")
+    directory = directory.resolve()
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     if not password_file.exists():
         if keystore.exists():
             raise ValueError("Signing password is missing; restore it, do not replace the existing signing key.")
@@ -116,9 +127,11 @@ def validate_signed_apk(apk, build_tools, *, expected_version, expected_code, en
         raise ValueError("Expected Android versionCode is invalid.")
     build_tools = Path(build_tools)
     # These values are needed for Gradle signing, not public APK verification.
-    tool_environment = None if environment is None else {
-        name: value for name, value in environment.items()
-        if name not in {"XIAYULUO_ANDROID_STORE_PASSWORD", "XIAYULUO_ANDROID_KEYSTORE"}
+    tool_environment = {
+        name: value for name, value in (os.environ if environment is None else environment).items()
+        if name not in {"XIAYULUO_ANDROID_STORE_PASSWORD", "XIAYULUO_ANDROID_KEYSTORE",
+                        "XIAYULUO_ANDROID_KEYSTORE_BASE64", "XIAYULUO_RELEASE_PRIVATE_KEY",
+                        "OPENAI_API_KEY", "ASSISTANT_MODEL_KEY", "CODEX_API_KEY", "GH_TOKEN", "GITHUB_TOKEN"}
     }
     options = {"env": tool_environment, "check": True, "capture_output": True,
                "text": True, "encoding": "utf-8", "errors": "replace"}
@@ -158,6 +171,8 @@ def main(argv=None):
     parser.add_argument("--signing-dir", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--architectures", default="arm64-v8a")
+    parser.add_argument("--require-existing-signing", action="store_true",
+                        help="Release identity gate: refuse missing keys/passwords instead of generating any.")
     args = parser.parse_args(argv)
     root = Path(__file__).resolve().parents[1]
     mobile = root / "mobile"
@@ -173,7 +188,8 @@ def main(argv=None):
     for tool in (java / "bin/javac", build_tools / "apksigner", build_tools / "aapt"):
         if not tool.is_file():
             raise ValueError(f"Missing build tool: {tool}")
-    keystore, password = signing(args.signing_dir, java / "bin/keytool")
+    keystore, password = signing(args.signing_dir, java / "bin/keytool",
+                                 require_existing=args.require_existing_signing)
     include_licenses(root)
     environment = dict(os.environ)
     environment.update(JAVA_HOME=str(java), ANDROID_HOME=str(sdk), ANDROID_SDK_ROOT=str(sdk),

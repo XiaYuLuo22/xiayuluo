@@ -5,6 +5,40 @@ export type UpdateConfig = { repository: string; manifest_url: string; public_ke
 export type Asset = { url: string; size: number; sha256: string };
 export type Release = { schema: number; application: string; version: string; android_code: number;
   notes: string; assets: Record<'windows-x64' | 'android-arm64', Asset> };
+export function trustedUpdateLocation(value: string): string {
+  const url = new URL(value);
+  if (url.protocol !== 'https:' || !['github.com', 'release-assets.githubusercontent.com', 'objects.githubusercontent.com'].includes(url.hostname)
+    || url.port || url.username || url.password || url.hash) throw new Error('更新重定向不在受信任的 HTTPS 发布源内。');
+  return url.toString();
+}
+export function manifestUrl(config: UpdateConfig): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/.test(config.repository)
+    || ['.', '..'].includes(config.repository.split('/')[1])) throw new Error('更新仓库配置无效。');
+  const expected = `https://github.com/${config.repository}/releases/latest/download/update.json`;
+  if (config.manifest_url !== expected) throw new Error('更新清单地址不是固定发布源。');
+  return expected;
+}
+
+/** Follow only bounded, explicitly validated public redirects; never carry device credentials. */
+export async function fetchUpdateResource(url: string, signal: AbortSignal,
+  fetcher: (url: string, init: RequestInit) => Promise<Response>): Promise<Response> {
+  let current = trustedUpdateLocation(url);
+  for (let step = 0; step < 6; step++) {
+    const response = await fetcher(current, { signal, redirect: 'manual', credentials: 'omit',
+      headers: { Accept: 'application/octet-stream', 'Accept-Encoding': 'identity' } });
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      const location = response.headers.get('location');
+      await response.body?.cancel();
+      if (!location) throw new Error('更新重定向缺少目标地址。');
+      current = trustedUpdateLocation(new URL(location, current).toString());
+      continue;
+    }
+    // Some native networking stacks may follow despite manual; still fail closed.
+    if (response.url) trustedUpdateLocation(response.url);
+    return response;
+  }
+  throw new Error('更新重定向次数过多，已停止。');
+}
 export function version(value: string): number[] {
   if (typeof value !== 'string' || !/^(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})$/.test(value)) throw new Error('更新版本号无效。');
   return value.split('.').map(Number);

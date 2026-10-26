@@ -9,7 +9,8 @@ import socket
 import subprocess
 import sys
 from threading import Lock, Thread, Timer
-from tempfile import mkdtemp
+from tempfile import mkdtemp, mkstemp
+from tempfile import gettempdir
 import shutil
 import time
 
@@ -21,6 +22,48 @@ from .server import create_app
 from .single_instance import SingleInstance
 from .speech import NativeSpeech
 from .training_storage import assert_training_separate, paths_overlap, resolve_training_root
+from . import __version__
+
+
+def acknowledge_update_health():
+    """One-shot, private helper acknowledgement after service + native window ready."""
+    raw = os.environ.pop("XIAYULUO_UPDATE_HEALTH", None)
+    if raw is None:
+        return False
+    try:
+        if len(raw) > 8192:
+            return False
+        data = json.loads(raw)
+        if (set(data) != {"nonce", "version", "acknowledgement"} or data["version"] != __version__
+                or not isinstance(data["nonce"], str) or len(data["nonce"]) != 64
+                or any(character not in "0123456789abcdef" for character in data["nonce"])):
+            return False
+        target = Path(data["acknowledgement"])
+        temporary = Path(gettempdir()).resolve()
+        if (not target.is_absolute() or target.name != "health-ready.json"
+                or not target.parent.name.startswith("xiayuluo-update-")
+                or not target.parent.resolve().is_relative_to(temporary) or not target.parent.is_dir()):
+            return False
+        for path in (target, *target.parents):
+            if os.path.lexists(path):
+                info = path.lstat()
+                if path.is_symlink() or getattr(info, "st_file_attributes", 0) & 0x400:
+                    return False
+        descriptor, temporary_name = mkstemp(prefix=".health-ready-", dir=target.parent)
+        partial = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                json.dump({"nonce": data["nonce"], "version": __version__, "ready": True}, stream)
+                stream.flush()
+                os.fsync(stream.fileno())
+            # Publish the complete document at once; the helper must not race a
+            # half-written JSON file and incorrectly roll back a healthy App.
+            os.link(partial, target, follow_symlinks=False)
+        finally:
+            partial.unlink(missing_ok=True)
+        return True
+    except (ValueError, TypeError, KeyError, OSError):
+        return False
 
 
 def configuration_directory():
@@ -116,6 +159,7 @@ class LocalService:
         with self.stop_lock:
             if not self.stopped:
                 self.app.state.native_window_open = True
+                acknowledge_update_health()
                 if self.app.state.voice:
                     self.app.state.voice.app_opened()
 
@@ -196,10 +240,13 @@ def run_window(settings, config_file, *, webview_module=None, debug=False, insta
                     helper_dir = Path(mkdtemp(prefix="xiayuluo-update-"))
                     try:
                         helper = helper_dir / "XiayuluoUpdater.exe"
-                        shutil.copyfile(install_dir / "XiayuluoUpdater.exe", helper)
+                        # The new signed bundle's helper understands the new
+                        # App's acknowledgement protocol; do not reuse stale code.
+                        shutil.copyfile(stage / "XiayuluoUpdater.exe", helper)
                         job = helper_dir / "job.json"
                         job.write_text(json.dumps({"pid": os.getpid(), "install": str(install_dir),
-                                                   "stage": str(stage), "protected_paths": protected_paths}), encoding="utf-8")
+                                                   "stage": str(stage), "protected_paths": protected_paths,
+                                                   "version": json.loads((stage / "build-info.json").read_text(encoding="utf-8"))["version"]}), encoding="utf-8")
                         subprocess.Popen([str(helper), str(job)], cwd=helper_dir,
                                          creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
                     except Exception:

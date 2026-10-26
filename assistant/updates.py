@@ -139,7 +139,7 @@ def response_stream(client, url):
     raise ValueError("更新重定向过多。")
 
 
-def fetch_bytes(url, limit, *, destination=None, expected_hash=None, expected_size=None, client=None):
+def fetch_bytes(url, limit, *, destination=None, expected_hash=None, expected_size=None, client=None, progress=None):
     owned = client is None
     client = client or httpx.Client(timeout=httpx.Timeout(30, read=60), follow_redirects=False)
     response = None
@@ -152,6 +152,8 @@ def fetch_bytes(url, limit, *, destination=None, expected_hash=None, expected_si
             raise ValueError("更新文件超过大小限制。")
         if destination:
             output = Path(destination).open("xb")
+        if progress:
+            progress(0, expected_size)
         for chunk in response.iter_bytes(chunk_size=65536):
             count += len(chunk)
             if count > limit:
@@ -161,6 +163,8 @@ def fetch_bytes(url, limit, *, destination=None, expected_hash=None, expected_si
                 output.write(chunk)
             else:
                 result.extend(chunk)
+            if progress:
+                progress(count, expected_size)
         if expected_size is not None and count != expected_size:
             raise ValueError("更新下载不完整，请重新下载。")
         if expected_hash and digest.hexdigest() != expected_hash:
@@ -234,6 +238,33 @@ class Updates:
         self.cache = Path(cache)
         self.protected_paths = tuple(protected_paths)
         self.lock = Lock()
+        self.progress_lock = Lock()
+        self._progress = {"phase": "idle", "version": None, "received_bytes": 0, "total_bytes": None,
+                          "message": "尚未开始更新。"}
+
+    def progress(self):
+        with self.progress_lock:
+            return dict(self._progress)
+
+    def _state(self, phase, message, **fields):
+        with self.progress_lock:
+            self._progress.update(phase=phase, message=message, **fields)
+
+    def _download_progress(self, received, total):
+        self._state("downloading", "正在下载已签名的更新包，当前版本尚未修改。",
+                    received_bytes=received, total_bytes=total)
+
+    @staticmethod
+    def _validate_build(stage, expected):
+        info_path = stage / "build-info.json"
+        if not info_path.is_file() or info_path.stat().st_size > 4096:
+            raise ValueError("更新包缺少有效的程序版本标识。")
+        try:
+            info = json.loads(info_path.read_text(encoding="utf-8"))
+        except (ValueError, UnicodeDecodeError) as error:
+            raise ValueError("更新包程序版本标识无效。") from error
+        if info != {"version": expected, "platform": "windows-x64"}:
+            raise ValueError("更新包程序版本不符。")
 
     def downloads(self):
         return {"current": __version__, "mode": "browser-download",
@@ -254,7 +285,9 @@ class Updates:
         archive = None
         archive_owned = False
         stage = None
+        stage_owned = False
         try:
+            self._state("checking", "正在检查签名清单。", received_bytes=0, total_bytes=None, version=None)
             data = self.check()  # Do not accept client-supplied URLs or a stale cached manifest.
             if not data["available"]:
                 raise ValueError("没有更高版本，不允许降级或重装。")
@@ -264,12 +297,22 @@ class Updates:
             identifier = uuid.uuid4().hex
             archive = self.cache / f"{identifier}.zip"
             asset = data["assets"]["windows-x64"]
+            self._state("downloading", "正在下载更新包。", version=data["version"], total_bytes=asset["size"])
             fetch_bytes(asset["url"], asset["size"], destination=archive,
-                        expected_hash=asset["sha256"], expected_size=asset["size"])
+                        expected_hash=asset["sha256"], expected_size=asset["size"], progress=self._download_progress)
             archive_owned = True
+            self._state("staging", "下载校验通过，正在检查程序内容；当前版本尚未修改。")
             stage = install.parent / f".{install.name}.update-{identifier}"
             extract_windows(archive, stage, protected_paths=self.protected_paths)
+            stage_owned = True
+            self._validate_build(stage, data["version"])
+            self._state("ready", "更新包已验证，准备重启；尚未确认新版已启动。")
             return stage
+        except Exception:
+            if stage_owned and stage.is_dir():
+                shutil.rmtree(stage)
+            self._state("failed", "更新准备失败，原程序和用户数据保留。")
+            raise
         finally:
             if archive_owned and archive.is_file():
                 archive.unlink()
@@ -282,6 +325,7 @@ class Updates:
         archive, stage = None, None
         archive_owned, stage_owned = False, False
         try:
+            self._state("checking", "正在校验本地签名更新包。", received_bytes=0, total_bytes=None, version=None)
             install = validate_install(install, self.protected_paths)
             assert_training_separate(self.cache, self.protected_paths)
             package = Path(package)
@@ -297,6 +341,7 @@ class Updates:
                 if version(data["version"]) <= version(__version__):
                     raise ValueError("没有更高版本，不允许降级或重装。")
                 asset = data["asset"]
+                self._state("verifying", "正在读取并校验本地更新包。", version=data["version"], total_bytes=asset["size"])
                 if bundle.getinfo(asset["filename"]).file_size != asset["size"]:
                     raise ValueError("更新文件大小不符。")
                 self.cache.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -311,18 +356,20 @@ class Updates:
                             raise ValueError("更新文件大小超限。")
                         digest.update(chunk)
                         output.write(chunk)
+                        self._state("verifying", "正在读取并校验本地更新包。", received_bytes=count)
                 if count != asset["size"] or digest.hexdigest() != asset["sha256"]:
                     raise ValueError("更新文件校验失败。")
             stage = install.parent / f".{install.name}.update-{identifier}"
+            self._state("staging", "签名与文件校验通过，正在检查程序内容。")
             extract_windows(archive, stage, protected_paths=self.protected_paths)
             stage_owned = True
-            info = json.loads((stage / "build-info.json").read_text(encoding="utf-8"))
-            if info != {"version": data["version"], "platform": "windows-x64"}:
-                raise ValueError("更新包程序版本不符。")
+            self._validate_build(stage, data["version"])
+            self._state("ready", "更新包已验证，准备重启；尚未确认新版已启动。")
             return stage
         except Exception:
             if stage_owned and stage.is_dir():
                 shutil.rmtree(stage)  # Only the newly created staging directory.
+            self._state("failed", "更新准备失败，原程序和用户数据保留。")
             raise
         finally:
             if archive_owned and archive.is_file():
