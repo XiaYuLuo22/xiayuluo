@@ -28,3 +28,13 @@ def test_both_release_builds_require_signing_preflight():
     for job in ('windows', 'android'):
         assert f'  {job}:\n    needs: preflight\n' in workflow
     assert 'needs: [windows, android]' in workflow
+
+
+def test_signing_preflight_can_be_run_without_creating_a_release_or_tag():
+    workflow = (Path(__file__).parents[1] / '.github/workflows/release.yml').read_text()
+    assert 'check_only:' in workflow
+    assert 'Only verify signing prerequisites; do not build, tag or publish' in workflow
+    for job in ('windows', 'android', 'publish'):
+        section = '\n'.join(workflow.split(f'  {job}:\n', 1)[1].splitlines()[:4])
+        assert 'if: ${{ !inputs.check_only }}' in section
+    assert 'run: python3 tools/check_release_secrets.py' in workflow
