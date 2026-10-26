@@ -8,6 +8,35 @@ class MemoryStore implements CloudStateStore {
   async load() { return this.value; }
   async save(value: string) { this.value = value; }
 }
+
+test('task polling persists actual results without resubmitting and rejects mismatched receipts', async () => {
+  const { engine, transport, submitted } = setup();
+  const task = await engine.enqueueTask('workspace1', 'session1', 'explicit computer task', 'task1');
+  await engine.syncOnce();
+  let polls = 0;
+  transport.getTask = async () => { ++polls; return { task: { ...task, status: 'succeeded', result: 'actual result' } }; };
+  const state = await engine.refreshTasks();
+  assert.equal((state.tasks[0].result as { task: { status: string } }).task.status, 'succeeded');
+  await engine.refreshTasks();
+  assert.equal(polls, 1); assert.equal(submitted.length, 1);
+  const second = await engine.enqueueTask('workspace1', 'session1', 'second explicit task', 'task2');
+  await engine.syncOnce();
+  transport.getTask = async () => ({ task: { ...second, id: 'wrong-task', status: 'running', result: null } });
+  await assert.rejects(engine.refreshTasks(), /不匹配/);
+  assert.equal((await engine.snapshot()).tasks[1].local_state, 'submitted');
+  assert.equal(submitted.length, 2);
+});
+
+test('task refresh is bounded and rotates through non-terminal tasks', async () => {
+  const { engine, transport } = setup();
+  for (let index = 0; index < 25; index++) await engine.enqueueTask('workspace1', 'session1', `task${index}`, `task${index}`);
+  await engine.syncOnce();
+  const calls: string[] = [];
+  transport.getTask = async id => { calls.push(id); return { task: { id, workspace_id: 'workspace1', session_id: 'session1', prompt: id, status: 'running', result: null } }; };
+  await engine.refreshTasks(); assert.equal(calls.length, 20);
+  await engine.refreshTasks(); assert.equal(calls.length, 40);
+  assert.equal(new Set(calls).size, 25);
+});
 function setup() {
   const store = new MemoryStore(), events: CloudEvent[] = [], submitted: CloudTask[] = [];
   let cursor = 0, next = 1;

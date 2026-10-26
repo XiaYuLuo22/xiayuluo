@@ -95,3 +95,33 @@ class CloudClient:
 
     async def get_task(self, task_id):
         return await self.request('GET', '/sync/v1/tasks/' + _identifier(task_id))
+
+    async def workspaces(self):
+        return await self.request('GET', '/sync/v1/workspaces')
+
+    async def device_info(self):
+        return await self.request('GET', '/sync/v1/device')
+
+    async def claim_task(self, workspace_id):
+        return await self.request('POST', '/sync/v1/tasks/claim', {'workspace_id': _identifier(workspace_id)})
+
+    @staticmethod
+    def _lease(value):
+        if (not isinstance(value, str) or not 20 <= len(value) <= 512
+                or any(ord(char) <= 32 or ord(char) >= 127 for char in value)):
+            raise CloudSyncError('云任务租约凭据无效。')
+        return value
+
+    async def start_task(self, task_id, lease_token):
+        return await self.request('POST', '/sync/v1/tasks/' + _identifier(task_id) + '/start',
+                                  {'lease_token': self._lease(lease_token)})
+
+    async def heartbeat_task(self, task_id, lease_token):
+        return await self.request('POST', '/sync/v1/tasks/' + _identifier(task_id) + '/heartbeat',
+                                  {'lease_token': self._lease(lease_token)})
+
+    async def finish_task(self, task_id, lease_token, status, result):
+        if status not in ('succeeded', 'failed') or not isinstance(result, str) or len(result) > 64000:
+            raise CloudSyncError('云任务结果格式无效。')
+        return await self.request('POST', '/sync/v1/tasks/' + _identifier(task_id) + '/result',
+                                  {'lease_token': self._lease(lease_token), 'status': status, 'result': result})

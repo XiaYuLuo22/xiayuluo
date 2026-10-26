@@ -18,7 +18,7 @@ def page(*events):
 def test_outbox_restarts_preserve_exact_id_and_private_scopes_are_rejected(tmp_path):
     path = tmp_path / 'cloud.sqlite3'
     replica = CloudReplica(path)
-    queued = replica.enqueue_event('session', 'session1', {'title': 'local title', 'created_at': 'now'})
+    queued = replica.enqueue_event('session', 'session1', {'title': 'local title', 'created_at': '2026-01-01T00:00:00Z'})
     replica.close()
     replica = CloudReplica(path)
     assert replica.pending() == [queued]
@@ -35,7 +35,7 @@ def test_outbox_restarts_preserve_exact_id_and_private_scopes_are_rejected(tmp_p
 def test_remote_versions_and_tombstones_are_retained_without_silent_conflict_loss(tmp_path):
     replica = CloudReplica(tmp_path / 'replica.sqlite3')
     replica.apply_page(page(event()))
-    pending = replica.enqueue_event('session', 'session1', {'title': 'unsent local', 'created_at': 'now'})
+    pending = replica.enqueue_event('session', 'session1', {'title': 'unsent local', 'created_at': '2026-01-01T00:00:00Z'})
     replica.apply_page(page(event(2, title='other device', revision=2)))
     assert replica.conflicts() == [pending]
     assert not replica.pending()
@@ -60,9 +60,20 @@ def test_invalid_page_rolls_back_entities_and_cursor_atomically(tmp_path):
     replica.close()
 
 
+@pytest.mark.parametrize('timestamp', ['now', '2026-01-01T00:00:00', '2026-99-99T00:00:00Z'])
+def test_invalid_remote_times_cannot_poison_local_memory_or_advance_cursor(tmp_path, timestamp):
+    replica = CloudReplica(tmp_path / 'replica.sqlite3')
+    incoming = event()
+    incoming['payload']['created_at'] = timestamp
+    with pytest.raises(CloudSyncError, match='时间'):
+        replica.apply_page(page(incoming))
+    assert replica.cursor == 0 and not replica.entities()
+    replica.close()
+
+
 async def test_offline_send_is_idempotent_and_conflict_preserves_original(tmp_path):
     replica = CloudReplica(tmp_path / 'replica.sqlite3')
-    queued = replica.enqueue_event('session', 'session1', {'title': 'local title', 'created_at': 'now'})
+    queued = replica.enqueue_event('session', 'session1', {'title': 'local title', 'created_at': '2026-01-01T00:00:00Z'})
     class Client:
         async def push_events(self, events):
             assert events == [queued]
@@ -105,7 +116,7 @@ async def test_task_submission_reuses_persisted_id_without_execution_replay(tmp_
     {'events': [event(entity_id='different')], 'cursor': 1}])
 async def test_http_success_without_exact_receipt_does_not_acknowledge_outbox(tmp_path, receipt):
     replica = CloudReplica(tmp_path / 'replica.sqlite3')
-    original = replica.enqueue_event('session', 'session1', {'title': 'local title', 'created_at': 'now'})
+    original = replica.enqueue_event('session', 'session1', {'title': 'local title', 'created_at': '2026-01-01T00:00:00Z'})
     class Client:
         async def push_events(self, events): return receipt
         async def pull_events(self, after): raise AssertionError('Invalid receipt must not proceed')
@@ -117,7 +128,7 @@ async def test_http_success_without_exact_receipt_does_not_acknowledge_outbox(tm
 
 async def test_valid_receipt_acknowledges_exact_batch_before_pull(tmp_path):
     replica = CloudReplica(tmp_path / 'replica.sqlite3')
-    original = replica.enqueue_event('session', 'session1', {'title': 'local title', 'created_at': 'now'})
+    original = replica.enqueue_event('session', 'session1', {'title': 'local title', 'created_at': '2026-01-01T00:00:00Z'})
     returned = {**original, 'cursor': 1, 'revision': 1}
     class Client:
         async def push_events(self, events): return {'events': [returned], 'cursor': 1}

@@ -129,6 +129,10 @@ def create_app(database, admin_token, *, allowed_hosts=('localhost', '127.0.0.1'
     def push(body: EventBatch, owner=Depends(device)):
         return store.push(owner['id'], [event.model_dump() for event in body.events])
 
+    @app.get('/sync/v1/device')
+    def current_device(owner=Depends(device)):
+        return {'device': owner}
+
     @app.get('/sync/v1/events')
     def pull(after: int = Query(default=0, ge=0, le=2**63-1),
              limit: int = Query(default=100, ge=1, le=100), owner=Depends(device)):
@@ -137,6 +141,10 @@ def create_app(database, admin_token, *, allowed_hosts=('localhost', '127.0.0.1'
     @app.post('/sync/v1/tasks')
     def submit(body: TaskRequest, owner=Depends(device)):
         return store.submit(owner['id'], body.model_dump())
+
+    @app.get('/sync/v1/workspaces')
+    def workspaces(owner=Depends(device)):
+        return {'workspaces': store.workspaces()}
 
     @app.post('/sync/v1/tasks/claim')
     def claim(body: ClaimRequest, owner=Depends(device)):

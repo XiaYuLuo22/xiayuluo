@@ -87,3 +87,29 @@ def test_cloud_status_and_manual_sync_require_local_owner(client_factory):
     assert client.get('/api/cloud-sync', headers={'X-Assistant-Token': ''}).status_code == 403
     assert client.get('/api/cloud-sync', headers={'X-Xiayuluo-Voice-Device': 'phone:fixture'}).status_code == 403
     assert client.post('/api/cloud-sync', json={'url': 'https://untrusted.example'}).status_code == 422
+
+
+async def test_switching_cloud_origin_blocks_old_outbox_without_stopping_chat(tmp_path):
+    from dataclasses import replace
+    from assistant.memory import MemoryStore
+    from assistant.cloud_replica import CloudReplica
+    memory = MemoryStore(tmp_path / 'memory.sqlite3')
+    settings = Settings(data_dir=str(tmp_path), cloud_sync_url='https://first.example',
+                        cloud_sync_device_token='fixture-device-token-0123456789')
+    first = CloudSyncRuntime(settings, memory)
+    try:
+        event = first.replica.enqueue_event('session', 'preserved-session', {
+            'title': '原云未发送消息', 'created_at': '2026-10-26T00:00:00+00:00'})
+        await first.close()
+        changed = CloudSyncRuntime(replace(settings, cloud_sync_url='https://different.example'), memory)
+        assert changed.status()['phase'] == 'blocked' and not changed.status()['usable']
+        await changed.start()
+        assert changed.task is None and changed.client is None
+        with pytest.raises(ValueError): await changed.sync_now()
+        await changed.close()
+        retained = CloudReplica(tmp_path / 'cloud-replica.sqlite3')
+        assert retained.pending()[0]['event_id'] == event['event_id']
+        retained.close()
+        assert memory.create_session()['id']  # Chat remains independently usable.
+    finally:
+        memory.close()

@@ -56,6 +56,18 @@ def test_tls_host_origin_admin_and_device_boundaries(cloud):
     assert client.get('/openapi.json').status_code == 404
 
 
+def test_device_identity_and_registered_workspaces_reveal_no_token_or_online_claim(cloud):
+    client, _, phone, desktop, _, _ = cloud
+    current = client.get('/sync/v1/device').json()['device']
+    assert current['id'] == phone['id'] and current['kind'] == 'phone'
+    assert not any(key in current for key in ('token', 'token_hash', 'device_token'))
+    workspaces = client.get('/sync/v1/workspaces').json()['workspaces']
+    assert workspaces == [{'id': WORKSPACE, 'name': 'Private device', 'status': 'registered', 'online': None}]
+    client.delete('/sync/v1/devices/' + desktop['id'], headers={'Authorization': 'Bearer ' + ADMIN})
+    assert client.get('/sync/v1/workspaces').json()['workspaces'] == []
+    assert client.get('/sync/v1/device', headers={'Authorization': ''}).status_code == 401
+
+
 def test_atomic_idempotent_incremental_events_and_optimistic_conflict(cloud):
     client, store, phone, desktop, _, _ = cloud
     first = event()
@@ -131,10 +143,28 @@ def test_all_persistent_memory_fields_roundtrip(cloud):
 
 
 def submit(client, task_id='task-1'):
+    assert client.post('/sync/v1/events', json={'events': [event('task-parent-session')]}).status_code == 200
     data = {'id': task_id, 'workspace_id': WORKSPACE, 'session_id': 'session-1', 'prompt': 'Inspect this workspace.'}
     response = client.post('/sync/v1/tasks', json=data)
     assert response.status_code == 200, response.text
     return data, response.json()
+
+
+def test_missing_or_deleted_session_cannot_become_a_computer_task(cloud):
+    client, _, _, desktop, _, _ = cloud
+    body = {'id': 'orphan', 'workspace_id': WORKSPACE, 'session_id': 'session-1', 'prompt': 'explicit task'}
+    assert client.post('/sync/v1/tasks', json=body).status_code == 409
+    submit(client)
+    headers = {'Authorization': 'Bearer ' + desktop['token']}
+    claimed = client.post('/sync/v1/tasks/claim', json={'workspace_id': WORKSPACE}, headers=headers).json()
+    lease = {'lease_token': claimed['lease_token']}
+    assert client.post('/sync/v1/tasks/task-1/start', json=lease, headers=headers).status_code == 200
+    deleted = event('delete-parent', revision=1, operation='delete')
+    assert client.post('/sync/v1/events', json={'events': [deleted]}).status_code == 200
+    assert client.get('/sync/v1/tasks/task-1').json()['task']['status'] == 'cancelled'
+    assert client.post('/sync/v1/tasks/task-1/heartbeat', json=lease, headers=headers).status_code == 409
+    assert client.post('/sync/v1/tasks', json={**body, 'id': 'cannot-revive'}).status_code == 409
+    assert client.post('/sync/v1/tasks/claim', json={'workspace_id': WORKSPACE}, headers=headers).json() == {'task': None}
 
 
 def test_task_queue_binding_fencing_and_result_visibility(cloud):

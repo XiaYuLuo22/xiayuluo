@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 import uuid
+from tempfile import mkstemp
 
 from .training_storage import TRAINING_MARKER, assert_training_separate
 
@@ -67,6 +68,21 @@ def wait_for_health(process, acknowledgement, nonce, expected_version, *, timeou
             return
         sleep(.1)
     raise TimeoutError("新版未在限定时间内确认窗口和本地服务就绪。")
+
+
+def confirm_background_start(directory, nonce, expected_version):
+    """After committing the healthy install, allow its background data writers."""
+    directory = Path(directory)
+    descriptor, name = mkstemp(prefix='.health-accepted-', dir=directory)
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
+            json.dump({'nonce': nonce, 'version': expected_version, 'accepted': True}, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(temporary, directory / 'health-accepted.json', follow_symlinks=False)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def swap_install(install, stage, launch=subprocess.Popen, *, protected_paths=(), health_check=None,
@@ -163,6 +179,8 @@ def main():
                        "health_check": lambda process: wait_for_health(process, acknowledgement, nonce, expected)}
         backup = swap_install(data["install"], data["stage"], protected_paths=protected_paths, **options)
         job.with_suffix(".result.json").write_text(json.dumps({"ok": True, "backup": str(backup)}), encoding="utf-8")
+        if expected is not None:
+            confirm_background_start(job.parent, nonce, expected)
     except Exception as error:
         job.with_suffix(".result.json").write_text(json.dumps({"ok": False, "error": str(error)}), encoding="utf-8")
         ctypes.windll.user32.MessageBoxW(None, "更新未完成，原程序或同级旧版备份已保留。请关闭本次新版窗口后重试；不要删除旧版备份或训练数据。", "夏鱼洛更新", 0x10)

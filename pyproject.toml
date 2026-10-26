@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xiayuluo-assistant"
-version = "0.1.15"
+version = "0.1.16"
 description = "An extensible local assistant with streaming chat, Codex, and desktop tools."
 license-files = ["THIRD_PARTY_NOTICES.md"]
 requires-python = ">=3.11"
@@ -26,12 +26,13 @@ browser = ["playwright>=1.50,<2"]
 
 [project.scripts]
 xiayuluo = "assistant.__main__:main"
+xiayuluo-cloud = "cloud_sync.__main__:main"
 
 [project.gui-scripts]
 xiayuluo-app = "assistant.desktop_app:main"
 
 [tool.setuptools.packages.find]
-include = ["assistant*"]
+include = ["assistant*", "cloud_sync*"]
 
 [tool.setuptools.package-data]
 assistant = ["static/*", "static/vendor/*", "update-config.json"]

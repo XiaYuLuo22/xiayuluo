@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import platform
 import secrets
+import sqlite3
 import time
 from urllib.parse import urlsplit, urlunsplit
 
@@ -20,6 +21,9 @@ from . import __version__
 from .updates import Updates
 from .training_storage import TrainingStorage
 from .cloud_runtime import CloudSyncRuntime
+from .cloud_execution import CloudTaskCodex
+from .cloud_tasks import CloudTaskWorker
+from .update_startup import StartupBackgroundGate
 from .voice_consent import VoiceConsents
 import httpx
 from .devices import Devices
@@ -82,6 +86,10 @@ class MouseControlRequest(Payload):
     enabled: bool = Field(strict=True)
 
 
+class CloudTasksRequest(Payload):
+    enabled: bool = Field(strict=True)
+
+
 class ProactiveRequest(Payload):
     enabled: bool = Field(strict=True)
     provider: str | None = Field(default=None, pattern="^(auto|api|codex)$")
@@ -125,9 +133,11 @@ def create_app(settings=None, *, memory=None, transport=None):
     async def lifespan(app):
         await app.state.proactive.start()
         await app.state.cloud_sync.start()
+        await app.state.cloud_tasks.start()
         try:
             yield
         finally:
+            await app.state.cloud_tasks.close()
             await app.state.cloud_sync.close()
             await app.state.proactive.close()
             await asyncio.to_thread(mouse.set_enabled, False)
@@ -156,12 +166,29 @@ def create_app(settings=None, *, memory=None, transport=None):
     # Construction and status are read-only: opening the App never starts collection.
     app.state.training_storage = TrainingStorage(settings.training_dir or None)
     app.state.last_training_backup = None
-    app.state.cloud_sync = CloudSyncRuntime(settings, memory)
+    app.state.startup_gate = StartupBackgroundGate()
+    app.state.cloud_sync = CloudSyncRuntime(settings, memory, ready=app.state.startup_gate.ready)
     app.state.voice = None
     app.state.speech = None  # Only the owned native window initializes local TTS.
     app.state.native_window_open = False
     app.state.greeting_claimed = False
     app.state.greeting_wait_started = None
+    cloud_codex = CloudTaskCodex(settings)
+    cloud_codex.lock = codex.lock
+    cloud_codex.approval_mode = automation.mode
+    app.state.cloud_codex = cloud_codex
+
+    def cloud_task_eligible():
+        return (app.state.presentation == 'desktop' and app.state.native_window_open
+                and not active_sessions and not app.state.updating and automation.automatic
+                and app.state.cloud_sync.bridge is not None
+                and not app.state.cloud_sync.paused and app.state.startup_gate.ready())
+
+    async def before_cloud_execution():
+        await app.state.proactive.interrupt_and_wait()
+
+    app.state.cloud_tasks = CloudTaskWorker(app.state.cloud_sync.client, cloud_codex, memory,
+        data_dir=settings.data_dir, eligible=cloud_task_eligible, before_execute=before_cloud_execution)
 
     def observation_available():
         if not app.state.native_window_open:
@@ -175,6 +202,7 @@ def create_app(settings=None, *, memory=None, transport=None):
         speech = app.state.speech
         voice = app.state.voice
         return (app.state.native_window_open and not active_sessions and not app.state.updating
+                and app.state.cloud_tasks.current_id is None
                 and not codex.lock.locked()
                 and not (speech and speech.status().get("speaking"))
                 and not (voice and voice.status().get("phase") in {"thinking", "speaking"}))
@@ -228,6 +256,7 @@ def create_app(settings=None, *, memory=None, transport=None):
         active_sessions.add(session_id)
         app.state.greeting_claimed = True
         try:
+            await app.state.cloud_tasks.interrupt_and_wait()
             await proactive.interrupt_and_wait()
         except BaseException:
             active_sessions.discard(session_id)
@@ -498,6 +527,7 @@ def create_app(settings=None, *, memory=None, transport=None):
         except OSError as error:
             raise HTTPException(409, "未能保存执行方式，原设置保持不变。") from error
         codex.approval_mode = automation.mode
+        cloud_codex.approval_mode = automation.mode
         return automation.status()
 
     @app.get("/api/updates", dependencies=auth)
@@ -561,7 +591,57 @@ def create_app(settings=None, *, memory=None, transport=None):
     @app.get("/api/cloud-sync", dependencies=auth)
     async def cloud_sync_status(request: Request):
         training_owner(request)
-        return app.state.cloud_sync.status()
+        return {**app.state.cloud_sync.status(), 'tasks': {
+            **app.state.cloud_tasks.status(), 'startup_ready': app.state.startup_gate.ready()}}
+
+    @app.get('/api/cloud-sync/issues', dependencies=auth)
+    async def cloud_sync_issues(request: Request):
+        training_owner(request)
+        bridge = app.state.cloud_sync.bridge
+        if bridge is None:
+            return {'items': []}
+        try:
+            return {'items': await asyncio.to_thread(bridge.issues)}
+        except (OSError, ValueError, sqlite3.Error) as error:
+            raise HTTPException(409, '同步记录状态无法安全读取；原聊天和队列保留。') from error
+
+    @app.get('/api/cloud-tasks', dependencies=auth)
+    async def cloud_task_status(request: Request):
+        training_owner(request)
+        return app.state.cloud_tasks.status()
+
+    @app.post('/api/cloud-tasks', dependencies=auth)
+    async def set_cloud_task_execution(body: CloudTasksRequest, request: Request):
+        training_owner(request)
+        if body.enabled and (app.state.updating or active_sessions
+                or not app.state.startup_gate.ready()
+                or app.state.presentation != 'desktop' or not app.state.native_window_open):
+            raise HTTPException(409, '请在电脑原生 App 空闲时开启云任务执行，浏览器或手机不能远程授予权限。')
+        try:
+            if body.enabled:
+                if app.state.cloud_tasks.client is None or not automation.automatic:
+                    raise ValueError('云任务未配置或当前不是自动执行策略。')
+                identity = (await app.state.cloud_tasks.client.device_info()).get('device')
+                if (not isinstance(identity, dict) or identity.get('kind') != 'desktop'
+                        or identity.get('workspace_id') != cloud_codex.workspace_status().get('id')):
+                    raise ValueError('电脑设备凭据与本机工作区不匹配。')
+            result = app.state.cloud_tasks.set_enabled(body.enabled)
+            if body.enabled:
+                await app.state.cloud_tasks.start()
+            else:
+                await app.state.cloud_tasks.interrupt_and_wait()
+                result = app.state.cloud_tasks.status()
+            return result
+        except (ValueError, OSError, sqlite3.Error) as error:
+            raise HTTPException(409, '云任务未启用；请检查云配置、工作区、自动执行策略与本机私有任务记录。原数据保留。') from error
+
+    @app.get('/api/cloud-tasks/records', dependencies=auth)
+    async def cloud_task_records(request: Request):
+        training_owner(request)
+        try:
+            return {'items': app.state.cloud_tasks.records()}
+        except (ValueError, OSError, sqlite3.Error) as error:
+            raise HTTPException(409, '本机云任务记录无法安全读取；原文件保留，请核实数据位置和格式。') from error
 
     @app.post("/api/cloud-sync", dependencies=auth)
     async def sync_cloud_data(body: Payload, request: Request):
@@ -593,6 +673,7 @@ def create_app(settings=None, *, memory=None, transport=None):
         app.state.update_phase = 'backing_up'
         try:
             await proactive.interrupt_and_wait()
+            await app.state.cloud_tasks.pause()
             await app.state.cloud_sync.pause()
             await backup_training(only_if_data=True)
             app.state.update_phase = 'preparing'
@@ -603,11 +684,13 @@ def create_app(settings=None, *, memory=None, transport=None):
             app.state.updating = False
             app.state.update_phase = 'error'
             await app.state.cloud_sync.start()
+            await app.state.cloud_tasks.start()
             raise
         except Exception as error:
             app.state.updating = False
             app.state.update_phase = 'error'
             await app.state.cloud_sync.start()
+            await app.state.cloud_tasks.start()
             raise HTTPException(409, "更新未完成，当前安装未被覆盖，请稍后重试。") from error
 
     @app.post("/api/updates/import", dependencies=auth)
@@ -620,6 +703,7 @@ def create_app(settings=None, *, memory=None, transport=None):
         app.state.update_phase = 'backing_up'
         try:
             await proactive.interrupt_and_wait()
+            await app.state.cloud_tasks.pause()
             await app.state.cloud_sync.pause()
             await backup_training(only_if_data=True)
             app.state.update_phase = 'preparing'
@@ -628,16 +712,19 @@ def create_app(settings=None, *, memory=None, transport=None):
             if not restarting:
                 app.state.updating = False
                 await app.state.cloud_sync.start()
+                await app.state.cloud_tasks.start()
             return {"restarting": bool(restarting), "cancelled": not restarting}
         except HTTPException:
             app.state.updating = False
             app.state.update_phase = 'error'
             await app.state.cloud_sync.start()
+            await app.state.cloud_tasks.start()
             raise
         except Exception as error:
             app.state.updating = False
             app.state.update_phase = 'error'
             await app.state.cloud_sync.start()
+            await app.state.cloud_tasks.start()
             raise HTTPException(409, "离线更新未完成：请检查签名、版本和安装目录；原版与用户数据保留。") from error
 
     @app.get("/api/sessions", dependencies=auth)

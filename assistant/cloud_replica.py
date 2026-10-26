@@ -4,6 +4,9 @@ This store contains no device token, model credentials, screenshots or training
 files. Pending edits survive restarts and conflicts are not silently discarded.
 """
 import asyncio
+from contextlib import contextmanager
+from datetime import datetime
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -11,7 +14,7 @@ import sqlite3
 from threading import RLock
 from uuid import uuid4
 
-from .cloud_client import CloudConflict, CloudSyncError, _identifier
+from .cloud_client import CloudConflict, CloudSyncError, _identifier, cloud_origin
 
 
 ENTITIES = ('session', 'message', 'memory')
@@ -48,6 +51,12 @@ def validate_payload(entity, operation, payload):
         if name in payload and not (name == 'expires_at' and payload[name] is None):
             if not isinstance(payload[name], str) or not 1 <= len(payload[name]) <= 64:
                 raise CloudSyncError('云同步时间字段无效。')
+            try:
+                parsed = datetime.fromisoformat(payload[name])
+                if parsed.tzinfo is None or parsed.utcoffset() is None:
+                    raise ValueError()
+            except ValueError:
+                raise CloudSyncError('云同步时间必须是带时区的有效 ISO 8601；原内容保留。') from None
     if entity == 'message':
         _identifier(payload['session_id'])
     if entity == 'memory':
@@ -57,7 +66,7 @@ def validate_payload(entity, operation, payload):
             _identifier(payload['source_session'])
     for name, value in payload.items():
         if name == 'uses':
-            if type(value) is not int or value < 0:
+            if type(value) is not int or not 0 <= value <= 2**31-1:
                 raise CloudSyncError('云同步记忆计数无效。')
         elif value is not None and not isinstance(value, str):
             raise CloudSyncError('云同步文字字段无效。')
@@ -69,11 +78,12 @@ def validate_event(event, *, remote=False):
         raise CloudSyncError('云同步事件字段不完整。')
     _identifier(event['event_id'])
     _identifier(event['entity_id'])
-    if type(event['base_revision']) is not int or event['base_revision'] < 0:
+    if type(event['base_revision']) is not int or not 0 <= event['base_revision'] <= 2**63-2:
         raise CloudSyncError('云同步记录版本无效。')
     validate_payload(event['entity'], event['operation'], event['payload'])
     if remote and (type(event.get('revision')) is not int or event['revision'] < 1
-                   or type(event.get('cursor')) is not int or event['cursor'] < 1):
+                   or event['revision'] != event['base_revision'] + 1
+                   or type(event.get('cursor')) is not int or not 1 <= event['cursor'] <= 2**63-1):
         raise CloudSyncError('云端事件游标或版本无效。')
 
 
@@ -104,11 +114,23 @@ class CloudReplica:
         self.lock = RLock()
         self.sync_lock = asyncio.Lock()
         self.db = sqlite3.connect(str(path), check_same_thread=False)
+        try:
+            self._initialize(path)
+        except BaseException:
+            self.db.close()
+            raise
+
+    def _initialize(self, path):
         self.db.row_factory = sqlite3.Row
         if str(path) != ':memory:' and os.name != 'nt':
             Path(path).chmod(0o600)
+        if self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='replica_state'").fetchone():
+            schema = self.db.execute("SELECT value FROM replica_state WHERE key='cloud_replica_schema'").fetchone()
+            if schema is not None and schema[0] != '1':
+                raise CloudSyncError('云同步副本格式不兼容；原数据库保留，不执行迁移或清空。')
         with self.db:
             self.db.execute('PRAGMA journal_mode=WAL')
+            self.db.execute('PRAGMA synchronous=FULL')
             self.db.executescript('''
                 CREATE TABLE IF NOT EXISTS replica_state(key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 INSERT OR IGNORE INTO replica_state VALUES ('cursor', '0');
@@ -122,6 +144,64 @@ class CloudReplica:
                 CREATE TABLE IF NOT EXISTS replica_tasks(
                     id TEXT PRIMARY KEY, task TEXT NOT NULL, state TEXT NOT NULL, result TEXT);
             ''')
+            self.db.execute("INSERT OR IGNORE INTO replica_state VALUES ('cloud_replica_schema','1')")
+            row = self.db.execute("SELECT value FROM replica_state WHERE key='bridge_identity_v1'").fetchone()
+            self.new_bridge_identity = row is None
+            if row is None:
+                self.db.execute("INSERT INTO replica_state VALUES ('bridge_identity_v1',?)", (uuid4().hex,))
+            elif not isinstance(row[0], str) or len(row[0]) != 32 or any(c not in '0123456789abcdef' for c in row[0]):
+                raise CloudSyncError('云同步稳定映射身份损坏；不会创建空映射代替原记录。')
+
+    @contextmanager
+    def transaction(self):
+        """Nested-safe transaction; a nested outbox insert never commits its caller."""
+        with self.lock:
+            nested = self.db.in_transaction
+            savepoint = 'cloud_' + uuid4().hex
+            self.db.execute('SAVEPOINT ' + savepoint if nested else 'BEGIN IMMEDIATE')
+            try:
+                yield
+                if nested:
+                    self.db.execute('RELEASE SAVEPOINT ' + savepoint)
+                else:
+                    self.db.commit()
+            except BaseException:
+                if nested:
+                    self.db.execute('ROLLBACK TO SAVEPOINT ' + savepoint)
+                    self.db.execute('RELEASE SAVEPOINT ' + savepoint)
+                else:
+                    self.db.rollback()
+                raise
+
+    @property
+    def bridge_identity(self):
+        with self.lock:
+            return self.db.execute("SELECT value FROM replica_state WHERE key='bridge_identity_v1'").fetchone()[0]
+
+    def bind_origin(self, origin):
+        """Bind this durable replica to one HTTPS service, without guessing migration."""
+        from urllib.parse import urlsplit
+        from urllib.parse import urlunsplit
+        parts = urlsplit(cloud_origin(origin))
+        hostname = parts.hostname.lower().encode('idna').decode('ascii')
+        host = '[' + hostname + ']' if ':' in hostname else hostname
+        if parts.port is not None and parts.port != 443:
+            host += ':' + str(parts.port)
+        digest = hashlib.sha256(urlunsplit(('https', host, '', '', '')).encode()).hexdigest()
+        with self.transaction():
+            row = self.db.execute("SELECT value FROM replica_state WHERE key='origin_sha256_v1'").fetchone()
+            if row is not None:
+                if row[0] != digest:
+                    raise CloudSyncError('云地址与原同步库不同；原队列保留，请明确迁移或使用独立配置。')
+                return
+            nonempty = self.cursor != 0 or any(self.db.execute('SELECT 1 FROM ' + table + ' LIMIT 1').fetchone()
+                                             for table in ('replica_entities', 'replica_outbox', 'replica_tasks'))
+            bridge_exists = self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bridge_records'").fetchone()
+            if bridge_exists and self.db.execute('SELECT 1 FROM bridge_records LIMIT 1').fetchone():
+                nonempty = True
+            if nonempty:
+                raise CloudSyncError('已有同步库未登记云地址；不会猜测归属或发送旧队列，请先核实迁移。')
+            self.db.execute("INSERT INTO replica_state VALUES ('origin_sha256_v1',?)", (digest,))
 
     def close(self):
         with self.lock:
@@ -140,7 +220,7 @@ class CloudReplica:
 
     def enqueue_event(self, entity, entity_id, payload=None, *, operation='upsert', event_id=None,
                       base_revision=None):
-        with self.lock, self.db:
+        with self.transaction():
             event = {'event_id': event_id or uuid4().hex, 'entity': entity, 'entity_id': entity_id,
                      'operation': operation, 'base_revision': self.revision(entity, entity_id) if base_revision is None else base_revision,
                      'payload': payload or {}}

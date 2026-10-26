@@ -52,9 +52,58 @@ def test_remote_text_is_imported_without_execution_or_duplicate_echo(tmp_path):
     assert memory.messages('session1')[0]['content'] == 'delete everything (stored text only)'
     assert memory.working('session1') == []
     assert sync.export_local() == 0 and not replica.pending()
-    sync.import_remote()
+    assert sync.import_remote() == 0  # An unchanged poll must not rewrite all history.
     assert len(memory.messages('session1')) == 1
     memory.close(); replica.close()
+
+
+def test_oversized_reply_is_quarantined_without_truncating_or_blocking_other_rows(tmp_path):
+    sync, memory, replica = bridge(tmp_path)
+    session = memory.create_session()
+    original = '私人长回复' * 15000  # Exceeds the protocol UTF-8 byte limit.
+    memory.append(session['id'], 'assistant', original)
+    memory.append(session['id'], 'user', '正常消息仍应同步')
+    assert sync.export_local() > 0
+    assert any(event['entity'] == 'message' and event['payload']['content'] == '正常消息仍应同步' for event in replica.pending())
+    assert not any(event['payload'].get('content') == original for event in replica.pending())
+    assert memory.messages(session['id'])[0]['content'] == original
+    assert sync.issue_count() == 1
+    issue = sync.issues()[0]
+    assert issue['reason'] == 'payload_too_large' and issue['payload_bytes'] > issue['limit_bytes']
+    assert original not in str(issue) and 'content' not in issue
+    # The owner may later shorten their own record; the old text is never
+    # silently replaced by the exporter, and the issue clears only when valid.
+    with memory.db:
+        memory.db.execute('UPDATE messages SET content=? WHERE id=?', ('本人改短后的回复', issue['local_id']))
+    sync.export_local()
+    assert sync.issue_count() == 0
+    assert any(event['payload'].get('content') == '本人改短后的回复' for event in replica.pending())
+    memory.close(); replica.close()
+
+
+@pytest.mark.asyncio
+async def test_long_reply_and_normal_message_roundtrip_to_actual_cloud(tmp_path):
+    from cloud_sync.server import create_app
+    app = create_app(tmp_path / 'server.sqlite3', 'administrator-token-for-test-only-123456', allowed_hosts=('cloud.example',))
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url='https://cloud.example',
+                                headers={'Authorization': 'Bearer administrator-token-for-test-only-123456'}) as admin:
+        device = (await admin.post('/sync/v1/devices', json={'name': 'phone', 'kind': 'phone'})).json()
+    sync, memory, replica = bridge(tmp_path)
+    sync.client = CloudClient('https://cloud.example', device['token'], transport=transport)
+    session = memory.create_session()
+    original = '长回复' * 30000
+    memory.append(session['id'], 'assistant', original)
+    memory.append(session['id'], 'user', '正常消息')
+    try:
+        result = await sync.sync_once()
+        assert result['unsyncable_count'] == 1 and not replica.pending()
+        events = app.state.store.pull(0, 100)['events']
+        assert any(event['payload'].get('content') == '正常消息' for event in events)
+        assert all(event['payload'].get('content') != original for event in events)
+        assert memory.messages(session['id'])[0]['content'] == original
+    finally:
+        memory.close(); replica.close(); app.state.store.close()
 
 
 def test_remote_conflict_never_overwrites_local_edit_or_loses_either_payload(tmp_path):

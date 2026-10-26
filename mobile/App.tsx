@@ -4,6 +4,7 @@ import { Alert, AppState, FlatList, KeyboardAvoidingView, Modal, Platform, Press
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { UpdateCard } from './src/UpdateCard';
+import { CloudPanel } from './src/CloudPanel';
 import { VoiceCard } from './src/VoiceCard';
 import { useVoice } from './src/voice';
 import { useReplySpeech } from './src/speech';
@@ -248,6 +249,7 @@ function Home() {
       <Text style={s.eyebrow}>YOUR DEVICES</Text><Text style={s.title}>随身聊，接着做</Text>
       <Text style={s.description}>手机、电脑、开发者模式，共用同一份对话与四级记忆。仅与你主动配对的电脑连接。</Text>
       <WorkspaceCard workspace={workspace} online={online} />
+      <CloudPanel initialWorkspaceId={workspace?.id || ''} onActivate={() => { void voice.stop(); void speech.stop(); }} />
       <UpdateCard disabled={busy} automatic={automatic} />
       <View style={s.card}><Text style={s.cardText}>回答朗读 · 系统中文音色</Text>
         <Text style={s.hint}>普通文字对话完整回答后自动朗读，不必开启麦克风；不朗读历史或未完成回复。当前只使用本机离线中文声音，后续可扩展音源选择。</Text>

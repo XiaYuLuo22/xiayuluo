@@ -14,6 +14,7 @@ export interface CloudTransport {
   pushEvents(events: CloudEvent[]): Promise<unknown>;
   pullEvents(after: number): Promise<CloudPage>;
   submitTask(task: CloudTask): Promise<unknown>;
+  getTask?(id: string): Promise<unknown>;
 }
 export class CloudSyncError extends Error {}
 export class CloudConflict extends CloudSyncError {}
@@ -160,6 +161,7 @@ export class CloudHTTPClient implements CloudTransport {
     return await this.request(`events?after=${after}&limit=100`) as unknown as CloudPage;
   }
   submitTask(task: CloudTask) { return this.request('tasks', task); }
+  getTask(id: string) { identifier(id); return this.request('tasks/' + id); }
 }
 
 export class CloudSyncEngine {
@@ -167,6 +169,7 @@ export class CloudSyncEngine {
   private readonly store: CloudStateStore;
   private readonly transport: CloudTransport;
   private readonly makeId: () => string;
+  private taskPollOffset = 0;
   constructor(store: CloudStateStore, transport: CloudTransport, makeId: () => string) {
     this.store = store; this.transport = transport; this.makeId = makeId;
   }
@@ -260,6 +263,33 @@ export class CloudSyncEngine {
         await this.store.save(JSON.stringify(next));
       }
       return clone(next);
+    });
+  }
+
+  refreshTasks(): Promise<CloudState> {
+    return this.exclusive(async () => {
+      const state = await this.load();
+      if (!this.transport.getTask) throw new CloudSyncError('当前云连接不支持查询任务状态。');
+      const waiting = state.tasks.filter(item => {
+        const previous = item.result as { task?: { status?: string } } | undefined;
+        return item.local_state === 'submitted' && !(previous?.task?.status &&
+          ['succeeded', 'failed', 'interrupted', 'cancelled'].includes(previous.task.status));
+      });
+      const selected = Array.from({ length: Math.min(20, waiting.length) },
+        (_, index) => waiting[(this.taskPollOffset + index) % waiting.length]);
+      this.taskPollOffset = waiting.length ? (this.taskPollOffset + selected.length) % waiting.length : 0;
+      for (const task of selected) {
+        const receipt = await this.transport.getTask(task.id) as { task?: Record<string, unknown> };
+        const remote = receipt?.task;
+        if (!remote || ['id', 'workspace_id', 'session_id', 'prompt'].some(key => remote[key] !== task[key as keyof CloudTask]) ||
+            typeof remote.status !== 'string' || !['queued', 'leased', 'running', 'succeeded', 'failed', 'interrupted', 'cancelled'].includes(remote.status) ||
+            !(remote.result === null || typeof remote.result === 'string' && remote.result.length <= 64000)) {
+          throw new CloudSyncError('云端任务状态不匹配，原本地任务和上次状态保留。');
+        }
+        task.result = receipt;
+        await this.store.save(JSON.stringify(state));
+      }
+      return clone(state);
     });
   }
 }

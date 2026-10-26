@@ -145,12 +145,22 @@ $('#stop-speaking').addEventListener('click', () => void stopSpeech());
 
 let updateBusy = false;
 let cloudSyncBusy = false;
+let cloudTaskChanging = false;
+function renderCloudTasks(info = {}) {
+  $('#cloud-tasks-card').hidden = !localTrainingOwner();
+  $('#cloud-task-enabled').checked = !!info.enabled;
+  $('#cloud-task-enabled').disabled = cloudTaskChanging || (!info.enabled &&
+    (!info.configured || info.startup_ready === false || state.status?.runtime.presentation !== 'desktop'));
+  $('#cloud-tasks-status').textContent = `${info.message || '云任务默认关闭；配置独立云服务后才能本机授权。'}${info.unconfirmed_count ? ` 有 ${info.unconfirmed_count} 项结果未确认，请查看本机记录，不要直接重发。` : ''}`;
+}
 function renderCloudSync(info) {
   $('#cloud-sync-status').textContent = `${info.message || '尚未核实'}${info.last_sync ? ` 最近同步：${info.last_sync}` : ''}`;
-  $('#cloud-sync-now').disabled = cloudSyncBusy || !info.configured || info.phase === 'syncing' || info.phase === 'paused';
+  $('#cloud-sync-now').disabled = cloudSyncBusy || !info.configured || info.usable === false || info.startup_ready === false || info.phase === 'syncing' || info.phase === 'paused';
+  renderCloudTasks(info.tasks);
 }
 async function refreshCloudSync() {
   $('#cloud-sync-card').hidden = !localTrainingOwner();
+  $('#cloud-tasks-card').hidden = !localTrainingOwner();
   if ($('#cloud-sync-card').hidden || cloudSyncBusy) return;
   try { renderCloudSync(await json('/api/cloud-sync')); }
   catch (error) { $('#cloud-sync-status').textContent = `无法核实云同步状态：${error.message}`; $('#cloud-sync-now').disabled = true; }
@@ -160,6 +170,21 @@ $('#cloud-sync-now').addEventListener('click', guarded(async () => {
   cloudSyncBusy = true; $('#cloud-sync-now').disabled = true;
   try { renderCloudSync(await post('/api/cloud-sync', {})); }
   finally { cloudSyncBusy = false; await refreshCloudSync(); }
+}));
+$('#cloud-task-enabled').addEventListener('change', guarded(async () => {
+  if (cloudTaskChanging || !localTrainingOwner()) return;
+  const enabled = $('#cloud-task-enabled').checked;
+  cloudTaskChanging = true; $('#cloud-task-enabled').disabled = true;
+  try { renderCloudTasks(await post('/api/cloud-tasks', { enabled })); }
+  finally { cloudTaskChanging = false; await refreshCloudSync(); }
+}));
+$('#cloud-task-records-button').addEventListener('click', guarded(async () => {
+  if (!localTrainingOwner()) return;
+  const result = await json('/api/cloud-tasks/records');
+  $('#cloud-task-records').textContent = result.items?.length
+    ? result.items.map(item => `${item.id} · ${item.phase}\n${String(item.result || '').slice(0, 1000)}`).join('\n\n')
+    : '暂无本机云任务执行记录。';
+  $('#cloud-task-records').hidden = false;
 }));
 let trainingStatus = null, trainingBusy = false, trainingLoading = false;
 const localTrainingOwner = () => !!state.token && ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)

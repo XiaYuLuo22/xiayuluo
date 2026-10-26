@@ -112,6 +112,17 @@ class Store:
                                   (token_hash(secret),)).fetchone()
             return dict(row) if row else None
 
+    def workspaces(self):
+        """Registration is not a heartbeat: never claim an executor is online."""
+        with self.lock:
+            rows = self.db.execute("SELECT workspace_id,name FROM devices WHERE kind='desktop' AND revoked=0 ORDER BY created_at,id")
+            result, seen = [], set()
+            for row in rows:
+                if row['workspace_id'] not in seen:
+                    seen.add(row['workspace_id'])
+                    result.append({'id': row['workspace_id'], 'name': row['name'], 'status': 'registered', 'online': None})
+            return result
+
     def revoke(self, device_id):
         with self.lock, self.db:
             changed = self.db.execute('UPDATE devices SET revoked=1 WHERE id=?', (device_id,)).rowcount
@@ -170,6 +181,10 @@ class Store:
                 revision = current + 1
                 self.db.execute('INSERT OR REPLACE INTO entities VALUES(?,?,?,?,?)',
                                 (event['entity'], event['entity_id'], revision, event['operation'], payload))
+                if event['entity'] == 'session' and event['operation'] == 'delete':
+                    self.db.execute("UPDATE tasks SET status='cancelled',lease_hash=NULL,lease_expires_at=NULL,updated_at=? "
+                                    "WHERE session_id=? AND status IN ('queued','leased','running')",
+                                    (self.clock(), event['entity_id']))
                 cursor = self.db.execute('''INSERT INTO events(event_id,device_id,entity,entity_id,operation,
                     base_revision,revision,payload,request_hash) VALUES(?,?,?,?,?,?,?,?,?)''',
                     (event['event_id'], device_id, event['entity'], event['entity_id'], event['operation'],
@@ -220,6 +235,10 @@ class Store:
                                        (data['workspace_id'],)).fetchone()
             if executor is None:
                 raise Conflict('workspace_has_no_executor')
+            parent = self.db.execute("SELECT operation FROM entities WHERE entity='session' AND entity_id=?",
+                                     (data['session_id'],)).fetchone()
+            if parent is None or parent['operation'] == 'delete':
+                raise Conflict('session_missing_or_deleted')
             now = self.clock()
             self.db.execute('''INSERT INTO tasks(id,device_id,workspace_id,session_id,prompt,request_hash,status,
                 created_at,updated_at) VALUES(?,?,?,?,?,?,'queued',?,?)''',
@@ -244,6 +263,12 @@ class Store:
             self.db.execute('BEGIN IMMEDIATE')
             self._active_device(device['id'])
             self._expire()
+            # Legacy orphaned queues or concurrently deleted sessions never
+            # become fresh computer commands after an upgrade or reconnect.
+            self.db.execute("UPDATE tasks SET status='cancelled',lease_hash=NULL,lease_expires_at=NULL,updated_at=? "
+                            "WHERE status IN ('queued','leased','running') AND NOT EXISTS "
+                            "(SELECT 1 FROM entities WHERE entity='session' AND entity_id=tasks.session_id AND operation='upsert')",
+                            (self.clock(),))
             row = self.db.execute("SELECT * FROM tasks WHERE workspace_id=? AND status='queued' ORDER BY created_at,id LIMIT 1",
                                   (workspace_id,)).fetchone()
             if not row:

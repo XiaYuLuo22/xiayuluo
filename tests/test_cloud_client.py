@@ -56,3 +56,23 @@ async def test_request_body_and_task_route_are_explicit_and_bounded():
     with pytest.raises(ValueError):
         await client.push_events([{'content': 'a' * 1100000}])
     assert len(calls) == 1
+
+
+async def test_worker_methods_are_explicit_fenced_routes_and_never_log_lease():
+    calls = []
+    client = CloudClient('https://cloud.example', 'device-token-0123456789012345',
+                         transport=httpx.MockTransport(lambda request: calls.append(request) or httpx.Response(200, json={'task': None})))
+    lease = 'lease-token-private-0123456789'
+    await client.claim_task('workspace1')
+    await client.start_task('task1', lease)
+    await client.heartbeat_task('task1', lease)
+    await client.finish_task('task1', lease, 'succeeded', '已完成测试任务')
+    assert [request.url.path for request in calls] == ['/sync/v1/tasks/claim', '/sync/v1/tasks/task1/start',
+        '/sync/v1/tasks/task1/heartbeat', '/sync/v1/tasks/task1/result']
+    assert json.loads(calls[0].content) == {'workspace_id': 'workspace1'}
+    assert all(json.loads(request.content)['lease_token'] == lease for request in calls[1:])
+    for task_id, token in [('../escape', lease), ('task1', 'short')]:
+        with pytest.raises(ValueError):
+            await client.start_task(task_id, token)
+    with pytest.raises(ValueError): await client.finish_task('task1', lease, 'queued', 'not a result')
+    assert len(calls) == 4 and lease not in repr(client)
