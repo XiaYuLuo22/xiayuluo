@@ -125,7 +125,7 @@ class MemoryCloudBridge:
                         validate_payload(entity, 'upsert', payload)
                         if entity == 'message' and payload['session_id'] in invalid_new_sessions:
                             raise CloudSyncError('parent record is not syncable')
-                    except (CloudSyncError, ValueError, TypeError):
+                    except (ValueError, TypeError):
                         reason = 'payload_too_large' if payload_size > 64000 else 'unsupported_record'
                         if entity == 'session' and self.replica.revision('session', local_id) == 0:
                             invalid_new_sessions.add(local_id)

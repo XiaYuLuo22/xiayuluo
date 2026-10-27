@@ -406,7 +406,7 @@ def restore_to_new_directory(archive, destination, *, max_files=MAX_FILES, max_b
                         try:
                             _no_links(directory)
                             directory.rmdir()
-                        except (FileNotFoundError, OSError, ValueError):
+                        except (OSError, ValueError):
                             pass
                     try:
                         destination.rmdir()

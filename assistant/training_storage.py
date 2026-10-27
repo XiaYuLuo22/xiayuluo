@@ -76,7 +76,7 @@ def _registered_root(*, platform=None, location_file=None):
         if set(data) != {'schema', 'root'} or type(data['schema']) is not int or data['schema'] != 1:
             raise ValueError()
         return _absolute(data['root'])
-    except (KeyError, TypeError, json.JSONDecodeError, ValueError) as error:
+    except (KeyError, TypeError, ValueError) as error:
         raise ValueError('训练目录位置记录损坏，请恢复原记录；不会自动改为空目录。') from error
 
 
@@ -158,7 +158,7 @@ def _file_lock(path, *, timeout=5):
                     import fcntl
                     fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 acquired = True
-            except (OSError, BlockingIOError):
+            except OSError:
                 if time.monotonic() - started >= timeout:
                     raise ValueError('训练数据正在写入或备份，未能取得锁；请稍后再试。')
                 time.sleep(.03)

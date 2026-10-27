@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 from threading import RLock
 from typing import Literal
 
-from pydantic import Field, ValidationError, model_validator
+from pydantic import Field, model_validator
 
 from .model import provider_events
 from .tools import Arguments, CodexChat
@@ -271,7 +271,7 @@ class MousePlanner:
             raise ValueError('未知鼠标规划来源。')
         try:
             result = MousePlan.model_validate(json.loads(''.join(parts)))
-        except (ValueError, TypeError, ValidationError) as error:
+        except (ValueError, TypeError) as error:
             raise ValueError('鼠标规划格式无效，未执行操作，请说明具体目标后重试。') from error
         if (result.width, result.height) != (snapshot['width'], snapshot['height']):
             raise ValueError('鼠标规划的截图尺寸不匹配，未执行操作。')

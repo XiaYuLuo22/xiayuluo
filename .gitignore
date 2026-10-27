@@ -20,4 +20,5 @@ mobile/ios/
 assistant/voice-model/
 mobile/voice-model/
 mobile/native/.gradle/
+mobile/native/.kotlin/
 mobile/native/build/

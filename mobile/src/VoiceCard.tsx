@@ -1,4 +1,3 @@
-import React from 'react';
 import { Alert, Pressable, Text, View } from 'react-native';
 import type { VoiceController } from './voice';
 

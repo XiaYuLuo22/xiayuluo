@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AppState, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { fetch } from 'expo/fetch';
 import * as FS from 'expo-file-system/legacy';

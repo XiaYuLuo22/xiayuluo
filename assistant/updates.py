@@ -44,7 +44,7 @@ def verify_windows_package(raw, config):
                 or not 1 <= asset["size"] <= MAX_DOWNLOAD or not re.fullmatch(r"[0-9a-f]{64}", asset["sha256"])):
             raise ValueError()
         return data
-    except (KeyError, TypeError, ValueError, InvalidSignature, json.JSONDecodeError) as error:
+    except (KeyError, TypeError, ValueError, InvalidSignature) as error:
         raise ValueError("离线更新包签名或内容无效，已拒绝更新。") from error
 
 
@@ -113,7 +113,7 @@ def verify_manifest(raw, config):
             if not parsed.path.startswith(expected) or not re.fullmatch(r"[A-Za-z0-9._-]+" + re.escape(suffix), parsed.path[len(expected):]):
                 raise ValueError()
         return data
-    except (KeyError, TypeError, ValueError, InvalidSignature, json.JSONDecodeError) as error:
+    except (KeyError, TypeError, ValueError, InvalidSignature) as error:
         raise ValueError("更新清单签名或内容无效，已拒绝更新。") from error
 
 
@@ -261,7 +261,7 @@ class Updates:
             raise ValueError("更新包缺少有效的程序版本标识。")
         try:
             info = json.loads(info_path.read_text(encoding="utf-8"))
-        except (ValueError, UnicodeDecodeError) as error:
+        except ValueError as error:
             raise ValueError("更新包程序版本标识无效。") from error
         if info != {"version": expected, "platform": "windows-x64"}:
             raise ValueError("更新包程序版本不符。")

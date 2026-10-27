@@ -3,7 +3,6 @@
   --bg: #0c1118;
   --panel: #111821;
   --surface: #151e29;
-  --raised: #1a2532;
   --line: #263240;
   --ink: #d5dfe9;
   --muted: #8c9aab;
@@ -99,21 +98,16 @@ kbd { font-size: 8px; margin-left: auto; border: 1px solid #354557; border-radiu
 .welcome h2 { font-size: 25px; font-weight: 500; letter-spacing: .3px; margin-bottom: 16px; }
 .welcome h2 > span { color: var(--accent); margin-left: 3px; }
 .welcome > p { color: #8a9daf; line-height: 1.9; font-size: 12px; }
-.pipeline { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font: 8px var(--mono); margin: 22px 0 27px; }
-.pipeline span { border: 1px solid #283d49; border-radius: 4px; padding: 6px 8px; color: #80b4b1; background: #122129; }
-.pipeline i { font-style: normal; color: #536e7e; }
 .suggestions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .suggestions button { position: relative; display: grid; grid-template-columns: 31px 1fr; gap: 7px 10px; padding: 17px 14px; border: 1px solid var(--line); background: var(--panel); border-radius: 6px; text-align: left; }
 .suggestions button:hover { border-color: #42645b; background: #16242a; }
 .suggestion-icon { grid-row: span 2; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 5px; font: 18px var(--mono); }
 .mint { background: #1b3731; color: #7ed7be; }
 .lavender { background: #2c2841; color: #b4a3db; }
-.peach { background: #372b26; color: #d2a281; }
 .yellow { background: #353322; color: #cbc089; }
 .suggestions strong { font-size: 11px; font-weight: 500; padding-top: 1px; }
 .suggestions small { font-size: 9px; color: #778c9e; }
 .arrow { position: absolute; top: 13px; right: 12px; color: #698491; font-size: 12px; }
-.welcome .welcome-footnote { margin-top: 21px; font-size: 10px; color: #617b8d; }
 .messages { max-width: 880px; margin: auto; padding: 27px 30px 12px; }
 .message { display: flex; gap: 11px; align-items: flex-start; margin-bottom: 25px; }
 .message-content { flex: 1; min-width: 0; }
@@ -344,8 +338,6 @@ body.inspector-closed .insight-panel { display: none; }
   .welcome h2 { font-size: 20px; line-height: 1.7; }
   .boot-label { font-size: 7px; }
   .welcome > p { font-size: 11px; }
-  .pipeline { gap: 6px; font-size: 7px; margin-bottom: 20px; }
-  .pipeline span { padding: 5px; }
   .suggestions { grid-template-columns: 1fr; }
   .suggestions button { padding: 13px; }
   .composer-wrap { padding: 10px 13px 11px; }

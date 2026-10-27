@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Platform, Pressable, Text, View } from 'react-native';
 import { cancelUpdate, checkUpdate, currentVersion, getUpdateState, installUpdate,
   openInstallPermissionSettings, reopenInstaller, subscribeUpdateState } from './updates';

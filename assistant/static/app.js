@@ -388,7 +388,7 @@ $('#proactive-control').addEventListener('click', guarded(toggleProactive));
 $('#proactive-setting').addEventListener('change', guarded(toggleProactive));
 setInterval(() => void pollProactive(), 5000);
 
-let greetingKnown = false, greetingBusy = false, greetingRetry;
+let greetingKnown = false, greetingBusy = false;
 async function claimGreeting() {
   if (!state.token || greetingKnown || greetingBusy) return;
   greetingBusy = true;
@@ -398,7 +398,7 @@ async function claimGreeting() {
       greetingKnown = true;
       transientNotice('greeting', result.greeting.message, 'startup');
     } else if (!result.pending) greetingKnown = true;
-    else greetingRetry = setTimeout(() => void claimGreeting(), 1000);
+    else setTimeout(() => void claimGreeting(), 1000);
   } catch { greetingKnown = true; } // Unsupported/headless hosts never get fabricated greetings.
   finally { greetingBusy = false; }
 }

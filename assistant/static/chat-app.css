@@ -23,7 +23,7 @@ body:not(.developer-mode) .developer-only { display: none !important; }
 #pending-tasks .memory-card h2, #device-list .memory-card h2 { font-size: 15px; margin-bottom: 10px; }
 #pending-tasks .primary-button { margin-top: 15px; }
 
-body:not(.developer-mode) { color-scheme: light; --bg: #fcfcfb; --panel: #fff; --surface: #f3f5f3; --raised: #eef2ef; --line: #e5e9e5; --ink: #263730; --muted: #78847c; --accent: #238b68; --accent-dim: #e7f4ec; --danger: #b75050; --amber: #b68a43; color: var(--ink); background: var(--bg); font-size: 14px; }
+body:not(.developer-mode) { color-scheme: light; --bg: #fcfcfb; --panel: #fff; --surface: #f3f5f3; --line: #e5e9e5; --ink: #263730; --muted: #78847c; --accent: #238b68; --accent-dim: #e7f4ec; --danger: #b75050; --amber: #b68a43; color: var(--ink); background: var(--bg); font-size: 14px; }
 body:not(.developer-mode) .app-shell, body:not(.developer-mode).inspector-closed .app-shell { grid-template-columns: 240px minmax(0, 1fr); height: 100dvh; }
 body:not(.developer-mode) .sidebar { background: #f2f5f1; border-color: #e8ece7; padding: 30px 15px 18px; }
 body:not(.developer-mode) .brand { font-size: 22px; font-weight: 650; gap: 12px; padding: 0 10px 27px; letter-spacing: 1px; }
@@ -69,7 +69,6 @@ body:not(.developer-mode) .suggestions button:hover { border-color: #a3c5ae; bac
 body:not(.developer-mode) .suggestion-icon { border-radius: 9px; height: 34px; width: 34px; font-size: 19px; }
 body:not(.developer-mode) .mint { color: #539272; background: #ebf5ed; }
 body:not(.developer-mode) .lavender { color: #8b83b2; background: #f0edf8; }
-body:not(.developer-mode) .peach { color: #c19477; background: #fbf1e9; }
 body:not(.developer-mode) .yellow { color: #ab9956; background: #f7f3df; }
 body:not(.developer-mode) .suggestions strong { color: #53664f; font-size: 13px; font-weight: 500; }
 body:not(.developer-mode) .suggestions small { color: #74846e; font-size: 11px; }

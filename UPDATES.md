@@ -1,129 +1,72 @@
 # 夏鱼洛 App 内更新
 
+当前源码0.1.16 / Android versionCode17。仓库已公开，Windows测试安装包已构建，但没有正式签名 Release；按所有者要求暂缓发布配置，**不绕过校验、不更换原签名**。公开源码、构建产物、正式更新与真机验收不是同一状态。
+
+<a id="015-客户端完善与发布阻塞"></a>
+
 ## 0.1.15 客户端完善与发布阻塞
 
-客户端源码已补充下载进度和恢复状态，不把“文件已下载”“进程已创建”或“从安卓安装器返回”当成安装完成。
+保留此标题供旧链接定位。0.1.15补齐客户端可靠性，0.1.16继续保护云同步的更新启动窗口：
 
-- Windows 在线/离线包都核对实际 `build-info.json` 与签名版本；准备失败只清理自己创建的临时文件，不覆盖安装目录。App 显示训练备份、下载字节进度、校验和重启阶段。
-- 0.1.15 原生更新使用新签名包中的 helper：等待旧进程结束后替换，再要求新版本匹配本次随机标识、版本和原生窗口/本地服务就绪确认。超时或立即退出会停止本次拥有的进程并尝试恢复旧目录；不按 PID 猜测或杀其他程序。若独立子进程继续占用文件，可能无法自动改回目录，此时旧程序备份保留并明确报错，不宣称回滚成功。
-- 安卓可显式取消检查/下载；已验证缓存可重新核对清单和哈希后再打开系统安装器，不必重下。提供安装未知应用权限入口，但系统确认不能跳过，是否安装成功以重启后的真实版本为准。组件离开后不继续更新已卸载的界面。
-- 发布构建必须复用现有签名，缺密钥不能生成替代。签署清单前再次核验 APK 证书、包名、版本/版本码与 Windows build-info；发布后匿名获取固定更新源和两资产，复核签名、字节数、SHA-256及实际包。远程验收失败将本次新 Release 退回草稿，不删除旧版。
+- Windows 在线/离线包均复核实际 `build-info.json`、签名版本和资产哈希，界面展示训练备份、下载字节、校验、重启阶段；文件下载完成不等于安装成功。
+- helper 来自新签名包，等待旧进程退出后同盘替换，要求新版本返回匹配 nonce、版本、本地服务及原生窗口就绪 ACK。超时/立即退出时仅停止本次持有的进程并尝试回滚，不猜PID或杀其他程序；独立子进程锁文件时保留旧版备份并报错。
+- helper 完成健康判断、写成功结果后，用同 nonce/version 的 `health-accepted.json` 解锁云导入与任务执行，避免仍可能回滚时改写旧版不理解的数据；确认失败则云功能等待手动重启，原数据/旧版备份保留。
+- Android 支持取消、验证缓存复用、重开系统安装器和未知应用权限入口；离开组件不更新旧界面，返回 App 不代表安装成功。
 
-实际 [check-only 预检](https://github.com/XiaYuLuo22/xiayuluo/actions/runs/40276737781)已运行，明确缺少以下 Actions Secrets：
+[实际 check-only 预检](https://github.com/XiaYuLuo22/xiayuluo/actions/runs/40276737781)明确缺少3项 Actions Secrets：`XIAYULUO_RELEASE_PRIVATE_KEY`、`XIAYULUO_ANDROID_KEYSTORE_BASE64`、`XIAYULUO_ANDROID_STORE_PASSWORD`。所有者应使用原有材料在 [Actions Secrets](https://github.com/XiaYuLuo22/xiayuluo/settings/secrets/actions)安全配置，不把值发到聊天、源码、日志或公开仓库。
 
-1. `XIAYULUO_RELEASE_PRIVATE_KEY`
-2. `XIAYULUO_ANDROID_KEYSTORE_BASE64`
-3. `XIAYULUO_ANDROID_STORE_PASSWORD`
-
-所有者在 [仓库 Actions Secrets](https://github.com/XiaYuLuo22/xiayuluo/settings/secrets/actions)使用**原有签名材料**安全配置，不把值发到聊天、写源码或公开上传。代理没有读取、输出或上传这些私密值，也没有生成替代身份。预检失败后构建/发布作业被跳过，没有创建新版本标签或 Release。
-
-补齐后可在 `release.yml` 的 Run workflow 勾选 `check_only` 再检查存在性，此模式不创建标签、不构建、不发布；通过仅代表值存在，真实签名仍须构建与核验。正式发布需在已测试的新版本标签运行完整工作流。不能移动已有标签或反复发布旧包。
-
-旧版 helper 不会被云端代码自动修复；首次必须取得一次支持这些功能的新安装包。保护仍要求更新前训练备份校验通过；保留外部配置、聊天、四级记忆、稳定云同步 ID 映射和训练目录。未进行用户 Windows/Android 真机覆盖升级，不保证之后任意时刻崩溃都能自动回滚。
-
-## 当前发布状态与公开仓库
-
-所有者已公开 `XiaYuLuo22/xiayuluo` 源码仓库。公开解决了资源可公开访问的前提，**不会自动生成 Release、安装包或签名清单**；版本号改变也不能当成已发布。当前仍需完整双端构建、同一 Android 签名和匹配固定公钥的清单，才能完成 App 内在线安装。早先直接查询 Secrets 返回403，现已通过只检查不发布的实际工作流明确确认缺项，见上节。
-
-0.1.13 Windows 首轮备份测试失败的原因是同一文件的路径 `stat/lstat` 与句柄 `fstat` 在 Windows/Python 3.12 的 `ctime` 含义不同。修复后跨接口核对实际文件身份及大小/修改时间，分别核对两种接口各自的读取前后完整签名，保留链接、替换、内容变化和 SHA-256 检查；不是取消一致性校验。修复后的 [Windows 0.1.13 构建](https://github.com/XiaYuLuo22/xiayuluo/actions/runs/40274377471)已成功，不代表包含新功能的 0.1.14 或真机覆盖升级已验收。
-
-当前客户端按钮不跳 GitHub：检查固定签名源 → 下载 → 校验 → Windows 重启替换或 Android 系统确认安装。有训练数据时先完成受锁保护的备份，失败不开始替换。公开仓库、云同步服务和模型提供者是不同的事；更新包不包含用户数据或签名材料。所有者另行允许聊天/训练备份使用公开仓库，采用显式加密备份而非默认上传，仍不上传登录凭据、签名/解密密钥，见 [CLOUD_SYNC.md](CLOUD_SYNC.md)。
-
-下文按版本保留历史背景；其中“当前私有”、浏览器下载回退及旧审批方式，只描述相应旧版，不覆盖本节或新版客户端行为。独立云同步没有服务器时不会自动开通，见 [CLOUD_SYNC.md](CLOUD_SYNC.md)。
-
-## 0.1.13 更新时保留训练数据
-
-训练数据改用安装目录外、跨版本登记的固定位置。Windows 默认 `%LOCALAPPDATA%\Xiayuluo\training`，与 `E:\Xiayuluo` 程序目录无关；首次可以明确指定其他独立绝对路径。已登记目录失联、新配置冲突或格式损坏时停止训练、备份与相关更新，不建立空目录代替。`datasets/`、`models/`、`checkpoints/`、`backups/` 分开保存，旧 `dist/` / `.vision-learning/` 实验文件不自动迁移或删除，也不自动纳入新根的快照。
-
-从 App「下载更新」或「选择更新包并重启」开始更新时，已有训练文件先取得跨进程写锁，建立并校验包含数据集、模型和检查点的 SHA-256 快照。锁不可用、内容变化、空间不足、校验失败或超过 10,000 文件/8 GiB 上限时停止更新，保留原文件，不以部分备份冒充成功。空训练区不会假装已有训练成果；更新包不包含用户训练数据，helper 和程序回滚不修改该目录，卸载也不清理用户训练目录。
-
-直接运行 `Xiayuluo-Setup.exe` 时会检查程序与训练目录是否隔离，但**不会运行 Python 自动备份训练文件**。手动覆盖安装前请先在 App「设置 → 训练数据保护」或 CLI 主动备份并核验。此保护需要先安装支持它的新版，不能给旧 App 或任意旧模型目录追溯补做备份。
-
-所有历史训练备份保留，不自动清理；界面显示的最近成功备份仅限本次运行，不是持久历史索引。默认备份明文、同盘，不能防硬盘故障、恶意软件或本人手删，须另做独立磁盘加密备份。CLI 的恢复只向不存在的绝对新目录生成副本，不覆盖原目录或自动切换登记；即使登记损坏也可先独立校验和恢复备份，见 [TRAINING_DATA.md](TRAINING_DATA.md)。
-
-0.1.13 训练数据保护面向 Windows，版本元数据同步为 0.1.13 / Android versionCode 14 不表示已有新 APK、真实示范采集或新一轮训练。后续版本继续保留此路径与数据格式，不自动迁移、覆盖或删除原文件。构建与验证结果以实际产物为准，公开仓库后的发布前提见本文件开头。
-
-## 0.1.12 发布与访问权限（历史）
-
-当时用户要求发布 0.1.12，但仓库仍私有；私有 Release 需有权限的 GitHub 账号，不能匿名获取更新清单，App 不内置 token。后来所有者已公开仓库，见本文件开头。任何版本是否发布、附件是否齐全仍以实际 Release 为准，不以标签、源码推送或工作流配置存在当作完成。
-
-发布工作流先检查既有的3项Actions签名Secrets是否配置，缺失时在构建前停止，仅报告名称、不输出值；不会生成替代签名或上传私钥。双端构建成功后，Android还需匹配原证书SHA-256 `bef9a3315531035f91362a72fd3012198304fd83d21d07009d67fd1df90ac96a`、包名、版本及versionCode，清单密钥必须匹配App固定公钥，才会上传完整草稿并转正式版。签名材料缺失须由所有者通过安全设置补齐，不要在聊天提供。
-
-## 0.1.11 点击直接下载，不再跳转网页
-
-电脑「设置 → 版本与更新 → 下载更新」与安卓「设备 → 版本与更新 → 下载更新」现在都先在应用内检查固定签名清单。有可用新版时同一次点击继续下载校验，Windows原生发行版按原位置重启替换，Android交给系统确认覆盖安装；不能绕过安卓安装权限或系统确认。电脑仅检查/小时轮询不自动安装，manual执行策略仍可要求应用确认，默认auto不额外弹窗。无新版、网络/私有权限失败或签名/哈希错误均保留当前版，不导航GitHub、不把失败说成已是最新版。源码版不自动覆盖checkout。
-
-0.1.11实现时仓库仍私有且无已发布Release，当时只完成客户端内流程，未改变可见性或内置token。0.1.12发布授权见上节。要真正在线直更，仍需用户选定可访问的签名发布源并正式发布；公开源码本身不等于已有清单和安装包。Windows本地`.xyupdate`导入仍可用。旧安装包的跳转按钮不会被云端热替换，需先覆盖安装新版一次。
-
-下文0.1.3浏览器回退是历史行为，已被本节覆盖。
-
-## 0.1.9 Windows 安装器与双通道更新
-
-0.1.9 开发时用户先选择全部私有，随后计划自行公开；所有者后续已完成公开，但代理不代为改变可见性、不内置 GitHub token。Windows 原生发行版启动及每小时可见空闲时自动检查固定签名清单，发现新版显示顶栏入口，点击后下载并重启；不自动安装、降级或在源码版自启检查。公开后仍须有完整的正式签名 Release，不能把公开源码当成更新服务已上线；未发布、断网或权限失败只提示真实状态，当前版本仍可使用。
-
-Windows 首次安装 `Xiayuluo-Setup.exe`，以后直接打开桌面/开始菜单「夏鱼洛」，不通过 CMD。后续在私人渠道取得 `.xyupdate` 后，在 App「设置 → 版本与更新 → 选择更新包并重启」用原生文件选择器选文件。取消即返回原版；签名、应用/平台、版本递增、大小、SHA-256、内部程序 build-info 全部通过后，才同盘暂存并调用独立 helper 重启替换。配置、四级记忆在安装目录外保留，已安装的卸载器文件保留，失败回滚。不能把源码 ZIP、普通 Windows ZIP 或 APK 当成签名更新包。
-
-本地导入接口只开放给本机已授权会话，HTTP 参数不接受任意文件路径；手机没有此能力。必须先完成/停止当前聊天和 Codex，源码版不能覆盖 checkout。没有新版本时不得把当前包反复重装。此版本没有数据库迁移，程序回滚不是记忆库备份。
-
-开发者私下生成更新包（不上传、不发布、不更换私钥）：
-
-```powershell
-python tools/release.py windows-package --version 0.1.9 --windows Xiayuluo-Windows.zip --notes-file RELEASE_NOTES.md --key-file .release-signing/release-private.pem --output Xiayuluo-0.1.9.xyupdate
-```
-
-输入必须是对应版本 Windows 构建，已有输出拒绝覆盖；更新包只含签名清单和运行程序 ZIP，不含私钥、用户配置或数据库。签名不是 Windows Authenticode，不消除系统 SmartScreen。正式 Windows 安装器和覆盖升级必须分别验证，不以 Linux 测试替代。
+`release.yml` 的 `check_only` 只检查存在性，禁止后续构建/发布，不创建标签；通过不代表密钥匹配。源码推送只触发独立 Windows 构建，不自动设置 Secrets 或发布 Release。不能移动旧标签、换密钥或反复重发旧包掩盖失败。
 
 ## 使用方式
 
-支持更新的版本从 **0.1.1** 开始，始终可见的「下载更新」按钮从 **0.1.3** 开始。旧包必须先手动覆盖安装一次新版；云端修改不能让已安装旧包凭空获得能力。
+- **Windows发行版**：设置 → 版本与更新 → 下载更新。先完成/停止聊天和Codex；点击后检查固定签名源、下载校验、重启替换，保留原安装位置。启动及每小时可见空闲只检查，不静默安装或降级。
+- **Android**：设备 → 版本与更新 → 下载更新。不依赖配对电脑在线；系统要求时授予安装未知应用权限，最终仍需本人确认覆盖安装，不卸载旧版。安装成功以重启后的真实版本为准。
+- **Windows离线包**：设置 → 版本与更新 → 选择更新包并重启，由原生文件选择器选择 `.xyupdate`；取消保留当前版。HTTP不接受任意文件路径，手机/源码版不能使用本机导入。
+- **源码/iOS**：源码可检查版本但不能自覆盖checkout、`.venv`或配置；需手动更新源码或先装Windows发行版。iOS尚无此安装更新流程。
 
-### 0.1.3 下载更新按钮（历史浏览器行为，已被 0.1.11 替代）
+无新版、未发布、网络失败或校验错误时保留当前版并显示真实原因，不回退GitHub网页、不冒报“已是最新版”。旧包的按钮不能被云端热替换，首次须手动取得支持该能力的新安装包。签名更新不是Windows Authenticode，不消除系统SmartScreen。
 
-- Windows：设置 → 版本与更新 → 下载更新，在系统浏览器打开 Windows 构建页面。登录有权限的 GitHub 账号，选择绿色成功的运行，下载 Artifacts 中的 `Xiayuluo-Windows`，解压后按 Windows 安装说明使用。失败或未完成的构建没有安装包；按钮本身不会修复构建。
-- Android：设备 → 版本与更新 → 下载更新。没有检查到签名新版时，打开仓库 Releases 页面，登录后选择已发布的安卓 APK，再由系统确认覆盖安装。若尚无 Release，此页面没有可下载的新版，不表示检查成功或已安装。
-- 两端按钮无需先成功读取公开更新清单；仓库私有导致清单 404 时仍可使用。不把 GitHub token 写进 App、链接或日志，不会改变仓库可见性。Android 已检查到有效签名新版时，同一个按钮改走下方校验安装流程。
+## 更新时保留训练数据
 
-### 签名清单安装流程
+训练根独立于安装/源码，Windows默认 `%LOCALAPPDATA%\Xiayuluo\training`，程序可安装到 `E:\Xiayuluo`。首次可选独立绝对根，位置跨版本登记；登记失联、新配置冲突或格式损坏时停止训练/备份/更新，不新建空数据代替。旧 `dist/` / `.vision-learning/` 文件不自动迁移或删除，详见 [TRAINING_DATA.md](TRAINING_DATA.md)。
 
-- Windows **发行版**：设置 → 版本与更新 → 检查更新 → 下载并重启更新。先完成或停止聊天/Codex。保持原安装位置，例如 `E:\Xiayuluo`；配置和数据库仍在 `%LOCALAPPDATA%\Xiayuluo` 或原先配置的数据目录，不被更新包覆盖。
-- Android：设备 → 版本与更新 → 检查更新 → 下载更新。不依赖已配对电脑在线。若系统要求，允许“夏鱼洛”安装未知应用并重试，最终必须由用户在系统安装器确认。不要卸载旧版，覆盖安装保留配对。
-- 源码版可以检查发布版本，但不能自动覆盖 checkout、`.venv` 或用户配置，需先安装一次 Windows 发行版。iOS 尚不支持此安装更新流程。
+App内更新遇到已有训练数据时先取得跨进程写锁，建立含datasets/models/checkpoints的快照并校验SHA-256；锁/空间/内容变化/校验失败，或超过10,000文件/8GiB时中止更新，不以部分备份冒充成功。helper、程序回滚和卸载均不操作训练根。
 
-0.1.9 Windows 发行版增加启动自动检查与可用更新提示；下载安装仍需主动点击，沿用电脑确认策略，不是静默安装、强制升级或代码热替换。云端未发布、断网或签名失败会明确报错，不冒报“已是最新版”。
+直接运行 `Xiayuluo-Setup.exe` 只检查目录隔离，**不调用Python自动备份**；手动覆盖前须在App或CLI备份并校验。历史备份不自动清理，最近成功备份仅本次运行记录。明文同盘备份不防硬盘损坏、恶意软件或手删，应另做独立磁盘加密备份。恢复只写不存在的新目录，不覆盖原根或自动改登记。
 
 ## 云端更新何时可见
 
-修改代码不等于发布更新。发布者需要：递增版本及 Android versionCode → 测试 → 两端构建 → 签名清单 → 发布完整 Release。App 从固定 HTTPS 地址读取 `update.json`，不从聊天内容接收下载地址，不执行源代码分支上的最新脚本。
+发布流程：递增版本/Android versionCode → 测试 → 双端构建 → 原签名核验 → 签署清单 → 上传完整草稿 → 转正式版 → 匿名下载复核。只有全部成功，App才有可下载安装的新版本。
 
-默认清单地址为 `https://github.com/XiaYuLuo22/xiayuluo/releases/latest/download/update.json`。它目前只是配置目标，**尚未正式发布或通过远程端到端升级验收**。清单式安装必须存在可访问的正式 Release。私有仓库的匿名链接不可用，0.1.11按钮会在App内说明发布源未就绪，不再回退网页。若需始终私有而直接校验下载，须另行配置安全的私有更新服务，不能把GitHub token内置到App。未经用户确认不得公开发布私人程序。
+固定清单地址为 `https://github.com/XiaYuLuo22/xiayuluo/releases/latest/download/update.json`，当前仍是尚未正式上线的目标，不从聊天或源码分支接收下载脚本。私有仓库匿名地址不可用，不能把GitHub token内置App；也不擅自更改仓库可见性或公开私人数据。云同步服务、模型提供者与Release更新是不同链路，见 [CLOUD_SYNC.md](CLOUD_SYNC.md)。
 
 ## 开发者一次性发布配置
 
-1. `assistant/update-config.json` 和 `mobile/src/update-config.json` 必须一致，固定 Ed25519 公钥已写入。私钥在忽略提交的 `.release-signing/release-private.pem`，必须安全备份、保留，不能进入下载包、日志或源码提交；不要换一把新密钥继续给旧 App 发更新。
-2. Android 使用既有 `.android-signing/xiayuluo-private.p12` 和密码，包名仍是 `com.xiayuluo.assistant`。禁止替换为公共 debug key，否则不能覆盖升级。
-3. 源码和 `.github/workflows/release.yml` 保存到对应 GitHub 仓库；不提交 `.env`、`.assistant`、`.venv`、私钥和数据库。源码推送只会触发独立 Windows 构建，不会自动配置仓库 Secrets、推送版本标签或发布 Release；正式更新发布仍需确认访问方式并设置签名 Secrets。
-4. 在仓库 Actions Secrets 安全设置：
-   - `XIAYULUO_RELEASE_PRIVATE_KEY`：既有 Ed25519 私钥的 PEM。
-   - `XIAYULUO_ANDROID_KEYSTORE_BASE64`：既有 Android PKCS12 的 Base64。
-   - `XIAYULUO_ANDROID_STORE_PASSWORD`：既有 Android 密码。
-   不在聊天里提供这些值，也不写入工作流文件。
-5. 每次发布同步递增 `assistant/__init__.py`、`pyproject.toml`、`mobile/package.json`、`mobile/app.json`，更新 npm 锁文件和 `RELEASE_NOTES.md`，Android versionCode 递增。推送对应 `vX.Y.Z` 标签，或在该标签运行发布工作流。
+1. `assistant/update-config.json` 与 `mobile/src/update-config.json` 必须一致。固定Ed25519公钥不随意更换；保留忽略提交的 `.release-signing/release-private.pem`，安全独立备份。
+2. 复用 `.android-signing/xiayuluo-private.p12` 与原密码，包名固定 `com.xiayuluo.assistant`，实际证书SHA-256须为 `bef9a3315531035f91362a72fd3012198304fd83d21d07009d67fd1df90ac96a`，不能改用debug key。
+3. 通过仓库安全设置配置上文3项Secrets，不在工作流写值、不提交配置/数据库/私钥。清单私钥必须匹配固定公钥。
+4. 发布时同步更新 `assistant/__init__.py`、`pyproject.toml`、`mobile/package.json`、`mobile/app.json`、npm锁文件和 `RELEASE_NOTES.md`，Android versionCode递增。在已测试的 `vX.Y.Z` 标签运行完整工作流，不移动旧标签。
+5. 签署前再次核验APK实际证书、包名、版本/版本码与Windows build-info；发布后匿名下载清单及两资产，核验签名、字节、SHA-256和实际包。失败将本次新Release退回草稿，保留旧版。
 
-只有 Windows 和 Android 都构建/验证成功、私钥匹配固定公钥后，工作流才创建包含两个安装包和清单的草稿 Release，上传完整再公开正式版本。普通代码 push 不发布。首次 Windows 构建、真实双端覆盖升级、GitHub Actions 和实际远程更新源均需验收，不能以模拟测试替代。
+本人私下生成Windows离线包的示例（不上传、不发布、不换密钥）：
+
+```powershell
+python tools/release.py windows-package --version 0.1.16 --windows Xiayuluo-Windows.zip --notes-file RELEASE_NOTES.md --key-file .release-signing/release-private.pem --output Xiayuluo-0.1.16.xyupdate
+```
+
+输入须为对应版本构建，输出已存在则拒绝覆盖；包只含签名清单与程序ZIP，不含私钥或用户数据。
 
 ## 安全与恢复边界
 
-- 清单格式 `{payload: "原始 JSON 文本", signature: "Ed25519 十六进制签名"}`：先验证原始 UTF-8 文本签名再解析内容。限制应用标识、仓库/标签、大小及 SHA-256，拒绝降级；清单最大 32 KiB，安装包最大 512 MiB。
-- Windows 保留 TLS 校验并逐跳限制 GitHub 官方资产重定向。下载完成前不修改安装目录；拒绝目录穿越、符号链接、重复路径、Windows 设备名称、用户数据和解压超限。同盘暂存，独立 helper 等旧进程退出再整体替换，替换或启动进程失败恢复原目录。
-- Windows 保留 `.Xiayuluo.backup-*` 旧程序目录供恢复，确认新版可用后可手动删除。它不是数据库备份，不保证自动发现“新 App 启动数秒后崩溃”。本次 helper 结果在系统临时 `xiayuluo-update-*` 下 `job.result.json`，不要在 helper 运行时删除。
-- 安装目录含 `.env`、`.assistant`、`.venv`、`.git` 或实际配置/数据/Codex 工作区路径时禁用或拒绝替换。无管理员提权，目录不可写、文件占用、空间不足时保留当前版并报错。
-- 安卓只在缓存下载，核对大小及原生 SHA-256 后交系统；失败缓存删除，下次下载替换旧 APK 缓存。系统再检查 APK 签名与版本。返回 App 不等于安装成功，不绕过系统权限或签名。
-- 本版没有数据库 schema 变更，不迁移或删除记忆。后续 schema 变更必须另做事务迁移、备份与恢复验收，不能用程序目录回退来回退数据库。
+- 清单为 `{payload: "原始JSON文本", signature: "Ed25519十六进制签名"}`，先校验原始UTF-8签名再解析。校验应用标识、仓库/标签、版本、大小与SHA-256，拒绝降级；清单最大32KiB、安装包最大512MiB。
+- 下载保留TLS并逐跳限制官方发布资产域名，不携带App/GitHub凭据。Windows拒绝路径穿越、链接、重复路径、设备名、用户数据和解压超限；下载/准备失败只清理自有临时文件。
+- 安装目录含配置/数据/训练/Codex工作区或 `.env`、`.assistant`、`.venv`、`.git` 时拒绝替换。目录不可写、占用、空间不足时保留当前版并报错，不管理员提权。
+- Windows保留同级 `.Xiayuluo.backup-*` 旧程序目录；它不是数据库备份。helper运行时不可清理临时 `xiayuluo-update-*/job.result.json` 或旧版备份。程序目录回滚不能回退数据库，schema变更需独立事务/备份/恢复验证。
+- Android仅向缓存下载，校验大小和原生SHA-256后交系统，系统复核APK签名/版本；失败只清理对应新缓存，已验证缓存重开安装器前再次核验，不绕过权限。
+- 升级保留外部配置、聊天、四级记忆、稳定同步ID/导入日志与训练目录。不要以删除副本/重建空库排错，云数据保护细节见 [CLOUD_SYNC.md](CLOUD_SYNC.md)。
 
-## 验证状态
+## 历史行为与验证状态
 
-自动化覆盖签名/篡改、版本比较、URL、大小/哈希、重定向、解压路径、符号链接/重名、目录保留、启动失败回滚、本地鉴权/确认、更新期间禁止新任务，以及记忆不变。手机协议签名与元数据测试、TypeScript 检查通过。尚未 Windows 与安卓真机覆盖升级验收，不能保证所有系统/网络状态下更新必定成功。
+0.1.1开始支持签名清单；0.1.3增加下载按钮，当时的浏览器回退已被0.1.11替代；0.1.9增加图形安装器、自动检查与本机离线包；0.1.13增加训练数据保护；0.1.15/0.1.16完善健康确认与云写入屏障。旧“私有仓库/跳网页/逐次批准”说明不覆盖当前行为，版本摘要见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
 
-0.1.3 完整 Python 测试 129 项通过、2 项 Windows 专属测试跳过，手机协议/下载链接 7 项测试及 TypeScript 检查通过。浏览器验收覆盖：私有清单检查失败时按钮仍可见、打开固定 GitHub 页面、不泄露本地 token/来源、不误报安装成功。Android 构建与核验记录见 ANDROID_INSTALL.md。
-
-Windows Actions 此前在 ZIP 原始名称测试中失败，现已修正 Windows 规范化差异与 vendor 字节换行保护；0.1.9 安装器及运行 ZIP 已在 Windows 首轮真实构建、上传。后续修改以对应 Actions 产物为准；CI 构建不是用户电脑安装、真实语音或覆盖升级验收。尚未正式发布在线签名清单。Expo 上游开发工具链审计记录见 MOBILE.md，未用强制降级掩盖风险。
+Windows测试安装包已成功构建，回归覆盖签名/篡改、版本/URL/大小/哈希、重定向、解压保护、目录保留、启动失败/回滚、鉴权、更新期间阻止新任务与训练数据保留；手机协议/TypeScript与脚本导出通过。尚未用户Windows/Android真机覆盖升级验收，不能保证任意系统/网络/故障状态下更新必定成功。实际Android包记录见 [ANDROID_INSTALL.md](ANDROID_INSTALL.md)，独立构建不等于正式在线发布。
