@@ -4,7 +4,7 @@ dependencies { testImplementation("junit:junit:4.13.2") }
 kotlin {
     jvmToolchain(17)
     sourceSets {
-        main { kotlin.srcDir("voice"); kotlin.include("WakeGate.kt", "SpeechText.kt") }
+        main { kotlin.srcDir("voice"); kotlin.include("WakeGate.kt", "SpeechText.kt", "SpeechPreferences.kt") }
         test { kotlin.srcDir("tests") }
     }
 }

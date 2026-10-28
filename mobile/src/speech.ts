@@ -28,7 +28,10 @@ export function useReplySpeech(connected: boolean, online: boolean) {
 
   useEffect(() => { void speech.setActive(connected && online && foreground); }, [speech, connected, online, foreground]);
   return { ...view, supported: !!native,
+    personalizationSupported: speech.personalizationSupported,
     speaking: view.pending || (view.status.speaking && view.status.owner !== 'voice'),
     beginTurn: () => speech.beginTurn(), completeTurn: speech.completeTurn.bind(speech),
-    stop: () => speech.stop(), configure: (enabled: boolean) => speech.configure(enabled) };
+    stop: () => speech.stop(), configure: (enabled: boolean) => speech.configure(enabled),
+    loadVoices: () => speech.loadVoices(),
+    configurePreferences: (voiceId: string | null, rate: number, volume: number) => speech.configurePreferences(voiceId, rate, volume) };
 }

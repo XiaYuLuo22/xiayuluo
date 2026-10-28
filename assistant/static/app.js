@@ -84,6 +84,7 @@ function renderSpeech() {
   $('#speech-status').textContent = !speechKnown ? '无法核实系统朗读状态；文字聊天仍可使用。'
     : `${speechState.message || (enabled ? '新回复完成后自动朗读。' : '回复朗读已关闭。')}${!speechState.available && speechState.reason ? ` ${speechState.reason}` : ''}${speechState.truncated ? ' 本轮只朗读了部分内容，全文请看聊天。' : ''}`;
   $('#reply-speech').title = $('#speech-status').textContent;
+  renderSpeechProfile();
 }
 function acceptSpeech(info) {
   if (!info || typeof info.enabled !== 'boolean' || !Number.isInteger(info.generation)) throw new Error('朗读服务状态格式无效。');
@@ -142,6 +143,153 @@ async function speakCompletedReply(text, generation) {
 $('#reply-speech').addEventListener('click', guarded(toggleSpeech));
 $('#reply-speech-setting').addEventListener('change', guarded(toggleSpeech));
 $('#stop-speaking').addEventListener('click', () => void stopSpeech());
+
+let speechVoices = [], speechProfileDirty = false, speechVoicesLoading = false;
+const nativeControlOwner = () => localTrainingOwner() && state.status?.runtime?.presentation === 'desktop';
+function renderSpeechProfile() {
+  const owner = localTrainingOwner();
+  $('#speech-personalization').hidden = !owner;
+  const ready = owner && nativeControlOwner() && speechKnown && speechState.available;
+  const disabled = !ready || speechChanging || speechVoicesLoading;
+  for (const id of ['speech-voice', 'speech-rate', 'speech-volume', 'speech-voices-refresh', 'speech-profile-save']) $("#" + id).disabled = disabled;
+  $('#speech-profile-preview').disabled = disabled || !speechState.enabled || speechProfileDirty;
+  $('#speech-profile-stop').disabled = !owner || !speechKnown || (!speechState.speaking && speechState.phase !== 'queued');
+  if (!speechProfileDirty) {
+    $('#speech-rate').value = Number.isInteger(speechState.rate) ? speechState.rate : 175;
+    $('#speech-volume').value = Number.isFinite(speechState.volume) ? Math.round(speechState.volume * 100) : 100;
+    if (typeof speechState.voice_id === 'string') {
+      if (![...$('#speech-voice').options].some(option => option.value === speechState.voice_id)) {
+        const option = el('option', '', '当前系统声音'); option.value = speechState.voice_id; $('#speech-voice').append(option);
+      }
+      $('#speech-voice').value = speechState.voice_id;
+    }
+  }
+  if (!ready && !speechVoicesLoading) $('#speech-profile-status').textContent = speechState.reason || '请在电脑原生 App 中使用本地系统语音；浏览器或手机不能配置此音色。';
+}
+for (const id of ['speech-voice', 'speech-rate', 'speech-volume']) $("#" + id).addEventListener('input', () => {
+  speechProfileDirty = true; renderSpeechProfile();
+  $('#speech-profile-status').textContent = '语音设置尚未保存；试听使用已保存设置。';
+});
+$('#speech-voices-refresh').addEventListener('click', guarded(async () => {
+  if (!nativeControlOwner() || speechChanging || speechVoicesLoading) return;
+  speechVoicesLoading = true; renderSpeechProfile();
+  try {
+    const result = await json('/api/speech/voices');
+    if (!Array.isArray(result.items) || result.items.length > 128 || result.items.some(item =>
+      !item || typeof item.id !== 'string' || !item.id || item.id.length > 2000 || typeof item.name !== 'string' || item.name.length > 500)) throw new Error('本地音色列表格式无效。');
+    const selected = $('#speech-voice').value;
+    speechVoices = result.items;
+    $('#speech-voice').replaceChildren();
+    for (const voice of speechVoices) { const option = el('option', '', voice.name); option.value = voice.id; $('#speech-voice').append(option); }
+    if (!speechVoices.length) { const option = el('option', '', '没有可用的系统声音'); option.value = ''; $('#speech-voice').append(option); }
+    if (speechVoices.some(voice => voice.id === selected)) $('#speech-voice').value = selected;
+    else if (speechVoices.some(voice => voice.id === speechState.voice_id)) $('#speech-voice').value = speechState.voice_id;
+    $('#speech-profile-status').textContent = speechVoices.length ? `找到 ${speechVoices.length} 个系统已安装声音；没有下载或克隆新声音。` : '未找到可用声音，请先在 Windows 安装本地中文语音。';
+  } finally { speechVoicesLoading = false; renderSpeechProfile(); }
+}));
+$('#speech-profile-save').addEventListener('click', guarded(async () => {
+  if (!nativeControlOwner() || !speechKnown || !speechState.available || speechChanging || speechVoicesLoading) return;
+  const rate = Number($('#speech-rate').value), volume = Number($('#speech-volume').value);
+  if (!Number.isInteger(rate) || rate < 80 || rate > 300 || !$('#speech-volume').value.trim() || !Number.isFinite(volume) || volume < 0 || volume > 100) throw new Error('语速需为80–300的整数，音量需在0–100%。');
+  const voice = $('#speech-voice').value, version = ++speechVersion;
+  speechChanging = true; renderSpeech();
+  try {
+    const info = await post('/api/speech', { enabled: speechState.enabled, ...(voice ? { voice_id: voice } : {}), rate, volume: volume / 100 });
+    if (version === speechVersion) { speechProfileDirty = false; acceptSpeech(info); $('#speech-profile-status').textContent = '本地音色、语速和音量已保存；可点击试听。'; }
+    else await refreshSpeech();
+  } catch (error) { await refreshSpeech(); throw error; }
+  finally { speechChanging = false; renderSpeech(); }
+}));
+$('#speech-profile-preview').addEventListener('click', guarded(async () => {
+  if (!nativeControlOwner() || speechProfileDirty || speechChanging || !speechKnown || !speechState.enabled || !speechState.available) return;
+  const version = speechVersion;
+  const info = await post('/api/speech/speak', { text: '你好，我是夏鱼洛。这是当前保存的本地声音。', generation: speechState.generation });
+  if (version === speechVersion) acceptSpeech(info);
+}));
+$('#speech-profile-stop').addEventListener('click', () => void stopSpeech());
+
+let autonomyState = null, visualLoopState = null, localControlsLoading = false, localControlsChanging = false, localControlVersion = 0;
+function renderAutonomy(info) {
+  autonomyState = info;
+  const native = nativeControlOwner(), ready = native && info?.available === true;
+  if (!localControlsChanging) $('#autonomy-enabled').checked = !!info?.enabled;
+  $('#autonomy-enabled').disabled = localControlsChanging || (!info?.enabled && !ready);
+  $('#autonomy-status').textContent = info?.message || '主动决策状态未核实，不会自动开始任务。';
+  for (const id of ['autonomy-goal', 'autonomy-criteria', 'autonomy-goal-save']) $("#" + id).disabled = localControlsChanging || !ready || !info?.enabled;
+  $('#autonomy-decide').disabled = localControlsChanging || !ready || !info?.enabled || info?.goal?.status !== 'active';
+  $('#autonomy-stop').disabled = !localTrainingOwner() || (!native && !info?.enabled && !localControlsChanging);
+  $('#autonomy-decision').hidden = !info?.last_decision;
+  $('#autonomy-decision').textContent = info?.last_decision ? JSON.stringify(info.last_decision, null, 2).slice(0, 8000) : '';
+  renderLocalControlStop();
+}
+const measured = (value, suffix = '') => Number.isFinite(value) && value >= 0 ? `${value.toFixed(1)}${suffix}` : '—';
+function renderVisualLoop(info) {
+  visualLoopState = info;
+  const ready = nativeControlOwner() && info?.available === true && (!info?.requires_mouse_control || info?.mouse_control_enabled === true);
+  const running = info?.running === true;
+  $('#visual-loop-status').textContent = `${info?.message || '本地视觉状态未核实，不会开始采样。'}${running ? info?.verified === false ? ' 上次状态为运行；当前未核实，可再次请求停止。' : info.phase === 'starting' ? ' 准备中，请在3秒内切到目标窗口；不执行鼠标。' : ' 正在进行限时影子测试，不执行鼠标。' : ''}${info?.requires_mouse_control && !info?.mouse_control_enabled ? ' 请先在聊天栏开启鼠标控制，再回来开始测试。' : ''}${info?.policy_ready === false ? ' 没有已加载策略，仅采样观察，不进行模型推理。' : ''}`;
+  for (const id of ['visual-loop-goal', 'visual-loop-frequency', 'visual-loop-start']) $("#" + id).disabled = localControlsChanging || !ready || running;
+  $('#visual-loop-stop').disabled = !localTrainingOwner() || (!nativeControlOwner() && !running && !localControlsChanging);
+  $('#visual-loop-capture-fps').textContent = measured(info?.capture_fps, ' 帧/秒');
+  $('#visual-loop-inference-fps').textContent = measured(info?.inference_fps, ' 次/秒');
+  $('#visual-loop-p95').textContent = `${measured(info?.p95_capture_ms, ' ms')} / ${measured(info?.p95_inference_ms, ' ms')}`;
+  $('#visual-loop-dropped').textContent = Number.isSafeInteger(info?.dropped_frames) && info.dropped_frames >= 0 ? String(info.dropped_frames) : '—';
+  renderLocalControlStop();
+}
+function renderLocalControlStop() {
+  $('#local-controls-stop').hidden = !localTrainingOwner() || !(autonomyState?.enabled || visualLoopState?.running || localControlsChanging);
+}
+async function refreshLocalControls() {
+  for (const id of ['speech-personalization', 'autonomy-card', 'visual-loop-card']) $("#" + id).hidden = !localTrainingOwner();
+  renderSpeechProfile();
+  if (!localTrainingOwner() || localControlsLoading || localControlsChanging) return;
+  localControlsLoading = true; const version = localControlVersion;
+  try {
+    await Promise.all([
+      json('/api/autonomy').then(info => { if (version === localControlVersion) renderAutonomy(info); }).catch(error => { if (version === localControlVersion) renderAutonomy({ ...autonomyState, available: false, verified: false, message: `无法核实主动决策：${error.message} 不能假定已经停止。` }); }),
+      json('/api/visual-loop').then(info => { if (version === localControlVersion) renderVisualLoop(info); }).catch(error => { if (version === localControlVersion) renderVisualLoop({ ...visualLoopState, available: false, verified: false, message: `无法核实本地视觉：${error.message}` }); }),
+    ]);
+  } finally { localControlsLoading = false; }
+}
+async function changeLocalControl(path, body, render) {
+  if (!nativeControlOwner() || localControlsChanging) return;
+  const version = ++localControlVersion;
+  localControlsChanging = true; renderAutonomy(autonomyState); renderVisualLoop(visualLoopState);
+  try { const info = await post(path, body); if (version === localControlVersion) render(info); }
+  finally { if (version === localControlVersion) { localControlsChanging = false; await refreshLocalControls(); } }
+}
+async function stopLocalControls(scope = 'both', disableAutonomy = false) {
+  if (!localTrainingOwner()) return;
+  const version = ++localControlVersion;
+  localControlsChanging = true; renderAutonomy(autonomyState); renderVisualLoop(visualLoopState);
+  const operations = [];
+  if (scope !== 'visual') operations.push(post(disableAutonomy ? '/api/autonomy' : '/api/autonomy/stop', disableAutonomy ? { enabled: false } : {}).then(info => { if (version === localControlVersion) renderAutonomy(info); }));
+  if (scope !== 'autonomy') operations.push(post('/api/visual-loop/stop', {}).then(info => { if (version === localControlVersion) renderVisualLoop(info); }));
+  const results = await Promise.allSettled(operations);
+  if (version !== localControlVersion) return;
+  localControlsChanging = false; await refreshLocalControls();
+  if (results.some(result => result.status === 'rejected')) throw new Error('部分停止请求尚未确认，请检查本机状态并再次停止；不会自动重启。');
+}
+$('#autonomy-enabled').addEventListener('change', guarded(() => $('#autonomy-enabled').checked
+  ? changeLocalControl('/api/autonomy', { enabled: true }, renderAutonomy) : stopLocalControls('autonomy', true)));
+$('#autonomy-goal-save').addEventListener('click', guarded(() => {
+  const goal = $('#autonomy-goal').value.trim(), criteria = $('#autonomy-criteria').value.trim();
+  if (!goal || !criteria) throw new Error('请填写明确目标和完成标准。');
+  return changeLocalControl('/api/autonomy/goals', { goal, success_criteria: criteria }, renderAutonomy);
+}));
+$('#autonomy-decide').addEventListener('click', guarded(() => changeLocalControl('/api/autonomy/decide', {}, renderAutonomy)));
+$('#autonomy-stop').addEventListener('click', guarded(() => stopLocalControls('autonomy')));
+$('#visual-loop-start').addEventListener('click', guarded(() => {
+  const goal = $('#visual-loop-goal').value.trim(), frequency = Number($('#visual-loop-frequency').value);
+  if (!goal || goal.length > 128 || !Number.isInteger(frequency) || frequency < 1 || frequency > 30) throw new Error('请填写最多128字的观察目标，目标采样频率需为1–30的整数。');
+  return changeLocalControl('/api/visual-loop/start', { goal, frequency_hz: frequency }, renderVisualLoop);
+}));
+$('#visual-loop-stop').addEventListener('click', guarded(() => stopLocalControls('visual')));
+$('#local-controls-stop').addEventListener('click', guarded(() => stopLocalControls()));
+$('#local-controls-refresh').addEventListener('click', guarded(refreshLocalControls));
+setInterval(() => {
+  if (!document.hidden && !$('#view-settings').hidden && (autonomyState?.enabled || visualLoopState?.running)) void refreshLocalControls();
+}, 1000);
 
 let updateBusy = false;
 let cloudSyncBusy = false;
@@ -501,7 +649,7 @@ async function openView(view) {
   if (view === 'debug') debug.refresh();
   if (view === 'tasks') await renderTasks();
   if (view === 'devices') await renderDevices();
-  if (view === 'settings') await Promise.all([refreshTrainingProtection(), refreshCloudSync()]);
+  if (view === 'settings') await Promise.all([refreshTrainingProtection(), refreshCloudSync(), refreshLocalControls()]);
 }
 function setBusy(busy) {
   state.busy = busy;
@@ -1027,6 +1175,7 @@ $('#refresh-status').addEventListener('click', guarded(refreshStatus));
 $('#refresh-status').addEventListener('click', () => void refreshProactive());
 $('#refresh-status').addEventListener('click', () => void refreshTrainingProtection());
 $('#refresh-status').addEventListener('click', () => void refreshCloudSync());
+$('#refresh-status').addEventListener('click', () => void refreshLocalControls());
 $('#add-memory').addEventListener('click', () => $('#memory-dialog').showModal());
 document.querySelectorAll('[data-close]').forEach((node) => node.addEventListener('click', () => $(`#${node.dataset.close}`).close()));
 $('#memory-form').addEventListener('submit', guarded(async (event) => {

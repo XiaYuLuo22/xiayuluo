@@ -1,6 +1,7 @@
 import asyncio
 import base64
-from contextlib import aclosing, asynccontextmanager
+from contextlib import aclosing, asynccontextmanager, suppress
+import hashlib
 import json
 from pathlib import Path
 import platform
@@ -24,6 +25,10 @@ from .cloud_runtime import CloudSyncRuntime
 from .cloud_execution import CloudTaskCodex
 from .cloud_tasks import CloudTaskWorker
 from .update_startup import StartupBackgroundGate
+from .autonomy import AutonomyController
+from .autonomy_planner import AutonomyPlanner
+from .visual_loop import VisualLoop
+from .visual_capture import MSSFrameSource
 from .voice_consent import VoiceConsents
 import httpx
 from .devices import Devices
@@ -98,6 +103,18 @@ class ProactiveRequest(Payload):
 class SpeechRequest(Payload):
     enabled: bool = Field(strict=True)
     voice_id: str | None = Field(default=None, max_length=2000)
+    rate: int | None = Field(default=None, strict=True, ge=80, le=300)
+    volume: float | None = Field(default=None, strict=True, ge=0, le=1, allow_inf_nan=False)
+
+
+class AutonomyGoalRequest(Payload):
+    goal: str = Field(min_length=1, max_length=2000)
+    success_criteria: str = Field(min_length=1, max_length=1000)
+
+
+class VisualLoopStartRequest(Payload):
+    goal: str = Field(min_length=1, max_length=128)
+    frequency_hz: int = Field(default=20, strict=True, ge=1, le=30)
 
 
 class SpeakRequest(Payload):
@@ -134,9 +151,15 @@ def create_app(settings=None, *, memory=None, transport=None):
         await app.state.proactive.start()
         await app.state.cloud_sync.start()
         await app.state.cloud_tasks.start()
+        app.state.autonomy_scheduler = asyncio.create_task(run_autonomy_scheduler())
         try:
             yield
         finally:
+            app.state.autonomy_scheduler.cancel()
+            with suppress(asyncio.CancelledError):
+                await app.state.autonomy_scheduler
+            await app.state.autonomy.close()
+            await app.state.visual_loop.close()
             await app.state.cloud_tasks.close()
             await app.state.cloud_sync.close()
             await app.state.proactive.close()
@@ -173,6 +196,10 @@ def create_app(settings=None, *, memory=None, transport=None):
     app.state.native_window_open = False
     app.state.greeting_claimed = False
     app.state.greeting_wait_started = None
+    app.state.autonomy_scheduler = None
+    app.state.autonomy_context_signature = None
+    app.state.autonomy_last_decision = None
+    app.state.visual_request_generation = 0
     cloud_codex = CloudTaskCodex(settings)
     cloud_codex.lock = codex.lock
     cloud_codex.approval_mode = automation.mode
@@ -182,9 +209,13 @@ def create_app(settings=None, *, memory=None, transport=None):
         return (app.state.presentation == 'desktop' and app.state.native_window_open
                 and not active_sessions and not app.state.updating and automation.automatic
                 and app.state.cloud_sync.bridge is not None
-                and not app.state.cloud_sync.paused and app.state.startup_gate.ready())
+                and not app.state.cloud_sync.paused and app.state.startup_gate.ready()
+                and not app.state.visual_loop.status()['running']
+                and app.state.autonomy.status()['phase'] != 'thinking')
 
     async def before_cloud_execution():
+        await app.state.visual_loop.interrupt_and_wait()
+        await interrupt_autonomy('明确云任务优先')
         await app.state.proactive.interrupt_and_wait()
 
     app.state.cloud_tasks = CloudTaskWorker(app.state.cloud_sync.client, cloud_codex, memory,
@@ -203,6 +234,8 @@ def create_app(settings=None, *, memory=None, transport=None):
         voice = app.state.voice
         return (app.state.native_window_open and not active_sessions and not app.state.updating
                 and app.state.cloud_tasks.current_id is None
+                and not app.state.visual_loop.status()['running']
+                and app.state.autonomy.status()['phase'] != 'thinking'
                 and not codex.lock.locked()
                 and not (speech and speech.status().get("speaking"))
                 and not (voice and voice.status().get("phase") in {"thinking", "speaking"}))
@@ -216,6 +249,81 @@ def create_app(settings=None, *, memory=None, transport=None):
                                    eligible=observation_eligible, provider=observation_provider, transport=transport)
     proactive.planner.lock = codex.lock
     app.state.proactive = proactive
+
+    def native_control_ready():
+        return (app.state.presentation == 'desktop' and app.state.native_window_open
+                and not app.state.updating and app.state.startup_gate.ready())
+
+    def decision_eligible():
+        return (native_control_ready() and not active_sessions
+                and app.state.cloud_tasks.current_id is None
+                and not app.state.visual_loop.status()['running'])
+
+    def decision_ready():
+        speech, voice = app.state.speech, app.state.voice
+        return (decision_eligible() and not (speech and speech.status().get('speaking'))
+                and not (voice and voice.status().get('phase') in {'thinking', 'speaking'}))
+
+    def visual_eligible():
+        return (native_control_ready() and not active_sessions and mouse.status()['enabled']
+                and app.state.cloud_tasks.current_id is None
+                and app.state.autonomy.status()['phase'] != 'thinking')
+
+    app.state.autonomy_planner = AutonomyPlanner(settings, lock=codex.lock)
+    app.state.autonomy = AutonomyController(app.state.autonomy_planner, eligible=decision_eligible)
+    app.state.visual_loop = VisualLoop(MSSFrameSource(enabled=settings.desktop_enabled), eligible=visual_eligible)
+
+    async def decide_once():
+        if codex.lock.locked() or not decision_ready():
+            return None
+        generation = app.state.autonomy.generation
+        decision = await app.state.autonomy.next_decision()
+        if decision is None or generation != app.state.autonomy.generation:
+            return None
+        app.state.autonomy_last_decision = decision
+        speech = app.state.speech
+        if decision['kind'] in {'speak', 'ask'} and decision_ready() and speech is not None:
+            current = speech.status()
+            if current.get('available') and current.get('enabled') and not current.get('speaking'):
+                def enqueue_decision_speech():
+                    # The executor might not run this callback until after stop.
+                    # Serialize the actual enqueue with controller revocation,
+                    # not merely the earlier asyncio-side generation check.
+                    with app.state.autonomy.lock:
+                        if (generation != app.state.autonomy.generation or not app.state.autonomy.enabled
+                                or not decision_ready()):
+                            return
+                        speech.say(decision['message'], source='autonomy', expected_generation=current['generation'])
+                try:
+                    await asyncio.to_thread(enqueue_decision_speech)
+                except Exception:
+                    pass  # Decision text stays available if local playback fails.
+        return decision
+
+    async def interrupt_autonomy(reason):
+        await app.state.autonomy.interrupt_and_wait(reason)
+        if app.state.speech is not None and app.state.autonomy_last_decision is not None:
+            await asyncio.to_thread(app.state.speech.stop, 'autonomy')
+
+    async def run_autonomy_scheduler():
+        while True:
+            if app.state.autonomy.enabled and decision_ready():
+                context = proactive.context()
+                if context:
+                    latest = context[-1]
+                    signature = hashlib.sha256(json.dumps({key: latest.get(key) for key in
+                        ('category', 'activity')}, ensure_ascii=False).encode()).hexdigest()
+                    if signature != app.state.autonomy_context_signature:
+                        app.state.autonomy_context_signature = signature
+                        app.state.autonomy.observe('activity', latest['activity'], 'activity-' + signature)
+                try:
+                    await decide_once()
+                except asyncio.CancelledError:
+                    if asyncio.current_task().cancelling():
+                        raise
+                except (ValueError, OSError):
+                    pass
+            await asyncio.sleep(5)
     voice_consents = VoiceConsents(memory)
     app.state.voice_consents = voice_consents
     updater = Updates(Path(settings.data_dir) / "updates",
@@ -256,6 +364,9 @@ def create_app(settings=None, *, memory=None, transport=None):
         active_sessions.add(session_id)
         app.state.greeting_claimed = True
         try:
+            app.state.visual_request_generation += 1
+            await app.state.visual_loop.interrupt_and_wait()
+            await interrupt_autonomy('本机新指令优先')
             await app.state.cloud_tasks.interrupt_and_wait()
             await proactive.interrupt_and_wait()
         except BaseException:
@@ -429,12 +540,123 @@ def create_app(settings=None, *, memory=None, transport=None):
         if app.state.updating and body.enabled:
             raise HTTPException(409, "更新期间不能开启朗读。")
         try:
-            await asyncio.to_thread(speech.configure, body.enabled, body.voice_id)
+            preferences = {key: value for key, value in {'rate': body.rate, 'volume': body.volume}.items()
+                           if value is not None}
+            await asyncio.to_thread(speech.configure, body.enabled, body.voice_id, **preferences)
             return speech.status()
         except ValueError as error:
             raise HTTPException(409, str(error)) from error
         except Exception as error:
             raise HTTPException(409, "无法保存朗读配置，文字聊天仍可继续。") from error
+
+    @app.get('/api/speech/voices', dependencies=auth)
+    async def speech_voices(request: Request):
+        speech = local_speech(request)
+        return {'items': speech.voices()}
+
+    def control_owner(request):
+        if voice_owner(request).startswith('phone:'):
+            raise HTTPException(403, '主动决策和视觉循环仅在电脑本机管理，手机不能开启屏幕或执行权限。')
+
+    def autonomy_view():
+        result = app.state.autonomy.status()
+        planner_ready, reason = app.state.autonomy_planner.available()
+        available = native_control_ready() and result['available'] and planner_ready
+        return {**result, 'available': available, 'planner': 'codex-chatgpt-read-only',
+                'last_decision': app.state.autonomy_last_decision,
+                'message': result['message'] if available or result['enabled'] else
+                    reason if not planner_ready else '请在电脑原生 App 开启主动决策；浏览器、手机和更新启动等待期不可用。'}
+
+    def visual_view():
+        result = app.state.visual_loop.status()
+        available = native_control_ready() and bool(settings.desktop_enabled) and result['available']
+        return {**result, 'available': available, 'requires_mouse_control': True,
+                'mouse_control_enabled': mouse.status()['enabled'],
+                'message': result['message'] if available or result['running'] else
+                    '请使用启用桌面驱动的 Windows 原生 App；此测试仅观察/影子预测，不执行鼠标。'}
+
+    @app.get('/api/autonomy', dependencies=auth)
+    async def autonomy_status(request: Request):
+        control_owner(request)
+        return autonomy_view()
+
+    @app.post('/api/autonomy', dependencies=auth)
+    async def configure_autonomy(body: MouseControlRequest, request: Request):
+        control_owner(request)
+        try:
+            if body.enabled and not autonomy_view()['available']:
+                raise ValueError('请在电脑原生 App 配置官方 Codex CLI 后开启主动决策。')
+            app.state.autonomy.enable(body.enabled)
+            if not body.enabled:
+                await interrupt_autonomy('用户关闭主动决策')
+            return autonomy_view()
+        except (ValueError, OSError) as error:
+            raise HTTPException(409, str(error) if isinstance(error, ValueError) else '主动决策未开启，原目标保留。') from error
+
+    @app.post('/api/autonomy/goals', dependencies=auth)
+    async def autonomy_goal(body: AutonomyGoalRequest, request: Request):
+        control_owner(request)
+        try:
+            if not body.goal.strip() or not body.success_criteria.strip() or not app.state.autonomy.enabled:
+                raise ValueError('请先开启主动决策并填写明确目标和完成标准。')
+            await interrupt_autonomy('新目标取代旧目标')
+            app.state.autonomy.new_goal(body.goal, body.success_criteria)
+            app.state.autonomy_last_decision = None
+            app.state.autonomy_context_signature = None
+            app.state.autonomy.observe('user_message', body.goal)
+            return autonomy_view()
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
+
+    @app.post('/api/autonomy/decide', dependencies=auth)
+    async def autonomy_decide(body: Payload, request: Request):
+        control_owner(request)
+        if not decision_eligible() or not app.state.autonomy.enabled:
+            raise HTTPException(409, '请在本机空闲时开启主动决策并提交明确目标。')
+        try:
+            await decide_once()
+        except asyncio.CancelledError:
+            if asyncio.current_task().cancelling():
+                raise
+        return autonomy_view()
+
+    @app.post('/api/autonomy/stop', dependencies=auth)
+    async def stop_autonomy(body: Payload, request: Request):
+        control_owner(request)
+        await interrupt_autonomy('用户停止主动任务')
+        return autonomy_view()
+
+    @app.get('/api/visual-loop', dependencies=auth)
+    async def visual_loop_status(request: Request):
+        control_owner(request)
+        return visual_view()
+
+    @app.post('/api/visual-loop/start', dependencies=auth)
+    async def start_visual_loop(body: VisualLoopStartRequest, request: Request):
+        control_owner(request)
+        if not body.goal.strip():
+            raise HTTPException(422, '请填写明确的单行观察目标。')
+        if not visual_eligible() or not visual_view()['available']:
+            raise HTTPException(409, '请在电脑原生 App 空闲时开启聊天栏鼠标开关，再明确开始30秒影子测试。')
+        app.state.visual_request_generation += 1
+        generation = app.state.visual_request_generation
+        await interrupt_autonomy('本机视觉测试优先')
+        await proactive.interrupt_and_wait()
+        if generation != app.state.visual_request_generation or not visual_eligible():
+            raise HTTPException(409, '视觉测试已被停止或本机授权改变，未启动旧请求。')
+        try:
+            await app.state.visual_loop.start(body.goal, capture_hz=body.frequency_hz,
+                inference_hz=min(10, body.frequency_hz), duration_seconds=30, start_delay_seconds=3)
+            return visual_view()
+        except (ValueError, OSError, RuntimeError) as error:
+            raise HTTPException(409, '本地视觉循环未启动，请检查组件、桌面、焦点和鼠标开关；未执行鼠标或保存截图。') from error
+
+    @app.post('/api/visual-loop/stop', dependencies=auth)
+    async def stop_visual_loop(body: Payload, request: Request):
+        control_owner(request)
+        app.state.visual_request_generation += 1
+        await app.state.visual_loop.stop()
+        return visual_view()
 
     @app.post("/api/speech/stop", dependencies=auth)
     async def stop_speech(request: Request):
@@ -497,6 +719,9 @@ def create_app(settings=None, *, memory=None, transport=None):
             raise HTTPException(409, "更新期间不能更改鼠标控制。")
         try:
             await asyncio.to_thread(mouse.set_enabled, body.enabled)
+            if not body.enabled:
+                app.state.visual_request_generation += 1
+                await app.state.visual_loop.interrupt_and_wait()
         except ValueError as error:
             raise HTTPException(409, str(error)) from error
         return mouse.status()
@@ -672,6 +897,8 @@ def create_app(settings=None, *, memory=None, transport=None):
         app.state.updating = True
         app.state.update_phase = 'backing_up'
         try:
+            await app.state.visual_loop.interrupt_and_wait()
+            await interrupt_autonomy('更新暂停主动任务')
             await proactive.interrupt_and_wait()
             await app.state.cloud_tasks.pause()
             await app.state.cloud_sync.pause()
@@ -702,6 +929,8 @@ def create_app(settings=None, *, memory=None, transport=None):
         app.state.updating = True
         app.state.update_phase = 'backing_up'
         try:
+            await app.state.visual_loop.interrupt_and_wait()
+            await interrupt_autonomy('更新暂停主动任务')
             await proactive.interrupt_and_wait()
             await app.state.cloud_tasks.pause()
             await app.state.cloud_sync.pause()

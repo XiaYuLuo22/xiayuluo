@@ -28,6 +28,9 @@ def build_command(output, work):
         "--collect-all", "clr_loader", "--hidden-import", "clr", "--collect-submodules", "uvicorn",
         "--collect-all", "vosk", "--collect-all", "sounddevice", "--collect-all", "_sounddevice_data",
         "--collect-all", "pyttsx3", "--collect-all", "comtypes", "--hidden-import", "pyttsx3.drivers.sapi5", "--hidden-import", "pythoncom",
+        "--hidden-import", "transitions", "--hidden-import", "transitions.extensions.asyncio",
+        "--collect-all", "mss", "--hidden-import", "cv2",
+        "--exclude-module", "torch", "--exclude-module", "experiments",
         "--collect-submodules", "assistant", "--hidden-import", "webview.platforms.edgechromium",
         "--add-data", f"{ROOT / 'assistant/static'}:assistant/static",
         "--add-data", f"{ROOT / 'assistant/update-config.json'}:assistant",
@@ -41,14 +44,19 @@ def collect_licenses(destination):
     for distribution in metadata.distributions():
         name = distribution.metadata.get("Name", "unknown").replace("/", "_").replace("\\", "_")
         for item in distribution.files or []:
-            base = Path(str(item)).name.lower()
+            relative = Path(str(item))
+            base = relative.name.lower()
             if not base.startswith(("license", "copying", "notice")):
+                continue
+            if relative.is_absolute() or '..' in relative.parts:
                 continue
             source = Path(distribution.locate_file(item))
             if source.is_file():
-                folder = destination / name
-                folder.mkdir(exist_ok=True)
-                shutil.copy2(source, folder / source.name)
+                # NumPy/OpenCV wheels carry multiple distinct LICENSE files.
+                # Preserve their paths; flattening by basename overwrites notices.
+                target = destination / name / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, target)
     for candidate in [Path(sys.base_prefix) / "LICENSE.txt", Path(sys.base_prefix) / "LICENSE"]:
         if candidate.is_file():
             shutil.copy2(candidate, destination / "Python-LICENSE.txt")

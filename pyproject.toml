@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xiayuluo-assistant"
-version = "0.1.16"
+version = "0.1.17"
 description = "An extensible local assistant with streaming chat, Codex, and desktop tools."
 license-files = ["THIRD_PARTY_NOTICES.md"]
 requires-python = ">=3.11"
@@ -20,6 +20,7 @@ dependencies = [
 app = ["pywebview==6.2.1"]
 build = ["pyinstaller==6.22.3"]
 desktop = ["PyAutoGUI==0.9.54", "Pillow>=11,<13"]
+control = ["transitions==0.9.3", "mss==10.2.0", "opencv-python-headless==4.14.0.94", "numpy==2.4.2"]
 voice = ["vosk==0.3.45; sys_platform == 'win32'", "sounddevice==0.5.6; sys_platform == 'win32'", "pyttsx3==2.99; sys_platform == 'win32'"]
 test = ["pytest>=8,<10", "pytest-asyncio>=0.24,<2", "Pillow>=11,<13"]
 browser = ["playwright>=1.50,<2"]

@@ -244,6 +244,12 @@ kbd { font-size: 8px; margin-left: auto; border: 1px solid #354557; border-radiu
 .settings-card p { font-size: 11px; line-height: 1.9; color: #829eaf; margin-top: 12px; }
 .settings-card pre { background: #0d151e; border: 1px solid #263846; padding: 14px; margin: 16px 0; border-radius: 4px; font: 10px/1.9 var(--mono); color: #8eb6be; max-height: 420px; overflow: auto; }
 .settings-card code { font-size: 10px; padding: 2px 4px; border-radius: 3px; color: #a8c7cd; background: #1c2c38; }
+.control-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.control-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.local-controls > label, .control-fields > label { display: block; margin-top: 14px; font-size: 11px; line-height: 1.8; color: var(--ink); }
+.local-controls input[type="number"], .local-controls select, .local-controls textarea { width: 100%; display: block; min-width: 0; margin-top: 5px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--ink); font-size: 12px; }
+.local-controls textarea { resize: vertical; }
+.control-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 15px; }
 .training-details { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px 16px; margin: 16px 0; font-size: 11px; line-height: 1.7; }
 .training-details dt { color: var(--muted); }
 .training-details dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }

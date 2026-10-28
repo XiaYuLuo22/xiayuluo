@@ -2,7 +2,7 @@
 
 ## 现有安装包
 
-当前源码为 **0.1.16 / versionCode 17**，但最近实际构建的安卓包仍为 **0.1.12 / versionCode 13**。源码新增的独立云面板不在此旧 APK 中，尚无新版 APK，云服务未部署，详见 [CLOUD_SYNC.md](CLOUD_SYNC.md)。
+当前源码为 **0.1.17 / versionCode 18**，但最近实际构建的安卓包仍为 **0.1.12 / versionCode 13**。源码新增的云面板和语音个性化不在此旧 APK 中，尚无新版 APK，云服务未部署，详见 [CLOUD_SYNC.md](CLOUD_SYNC.md)、[本地控制运行时](CONTROL_RUNTIME.md)。
 
 - APK：`xiayuluo-0.1.12-android-arm64-final.apk`，77,738,838字节（约74.1 MiB）。
 - 安装 ZIP：`xiayuluo-0.1.12-android-arm64-install.zip`，57,115,228字节（约54.5 MiB），解压后安装其中 APK。

@@ -9,7 +9,7 @@ import sys
 
 PROBE = (
     "import sys; assert sys.version_info >= (3, 11); "
-    "import fastapi, uvicorn, httpx, dotenv, webview; "
+    "import fastapi, uvicorn, httpx, dotenv, webview, transitions, mss, cv2, numpy; "
     "from importlib.metadata import version; "
     "[version(name) for name in ('xiayuluo-assistant', 'PyAutoGUI', 'Pillow')]; "
     "import PIL.Image; import clr"
@@ -75,14 +75,14 @@ def bootstrap(root, *, runner=subprocess.run, executable=None, platform=None):
     if healthy:
         healthy = run([python, "-m", "pip", "check"], root, runner, quiet=True) == 0
     if not healthy or not matches_marker(marker, expected):
-        announce("[2/3] 正在安装/修复依赖，包括 uvicorn、桌面窗口和屏幕工具。")
+        announce("[2/3] 正在安装/修复依赖，包括桌面窗口、本地视觉与主动决策组件。")
         announce("首次需要联网，可能需要几分钟；请保留此窗口。")
         if run([python, "-m", "pip", "--version"], root, runner, quiet=True):
             if run([python, "-m", "ensurepip", "--upgrade"], root, runner):
                 announce("无法准备 pip。请修复 Python 安装后再试。")
                 return 1
         command = [python, "-m", "pip", "install", "--disable-pip-version-check",
-                   "-c", "requirements.lock", "-e", ".[app,desktop]"]
+                   "-c", "requirements.lock", "-e", ".[app,desktop,control]"]
         if run(command, root, runner):
             announce("依赖安装失败：请查看上方安装错误。检查网络；不会继续启动不完整的 App。")
             return 1

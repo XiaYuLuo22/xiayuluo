@@ -12,7 +12,8 @@ window.DebugConsole = (() => {
   const logs = [];
   let sequence = 0, payloads = false, run = null, timer = null, logRender = null;
   const secretKeys = /(?:^|_)(?:api_key|apikey|authorization|password|secret|token)$|secret|^x_assistant_token$/i;
-  const textKeys = new Set(['message', 'prompt', 'text', 'content']);
+  const textKeys = new Set(['message', 'prompt', 'text', 'content', 'goal', 'success_criteria',
+    'completion', 'step', 'summary']);
   const imageKeys = new Set(['image', 'image_url', 'screenshot', 'png', 'image_data']);
 
   function safeString(value) {

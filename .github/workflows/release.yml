@@ -50,7 +50,7 @@ jobs:
         shell: pwsh
         run: |
           if ($env:GITHUB_REF -notmatch '^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Run this workflow on a version tag.' }
-      - run: python -m pip install -c requirements.lock -e ".[app,desktop,voice,build,test]"
+      - run: python -m pip install -c requirements.lock -e ".[app,desktop,control,voice,build,test]"
       - run: python tools/release.py check-version ($env:GITHUB_REF_NAME.Substring(1))
         shell: pwsh
       - run: python -m pytest -q tests/test_updates.py tests/test_offline_updates.py tests/test_update_ownership.py tests/test_training_storage.py tests/test_training_backup.py tests/test_training_api.py tests/test_training_updates.py tests/test_training_data_cli.py tests/test_packaged_smoke.py tests/test_desktop_app.py tests/test_single_instance.py tests/test_mouse.py tests/test_mouse_api.py tests/test_proactive.py tests/test_proactive_api.py tests/test_mobile.py tests/test_codex_chat.py tests/test_voice.py tests/test_speech.py tests/test_speech_api.py tests/test_voice_consent.py tests/test_automation.py tests/test_release_checks.py tests/test_release_android.py
@@ -59,6 +59,8 @@ jobs:
         run: python tools/run_ci_command.py python -m pytest -q tests/test_online_update_completion.py tests/test_update_startup_gate.py tests/test_release_publish_validation.py
       - name: Validate activity, cloud sync and encrypted backup boundaries
         run: python tools/run_ci_command.py python -m pytest -q tests/test_activity_context.py tests/test_activity_api.py tests/test_cloud_client.py tests/test_cloud_replica.py tests/test_cloud_bridge.py tests/test_cloud_runtime.py tests/test_cloud_sync_server.py tests/test_cloud_end_to_end.py tests/test_cloud_crash_recovery.py tests/test_cloud_tasks.py tests/test_cloud_task_api.py tests/test_github_backup.py
+      - name: Validate local control and personalized speech boundaries
+        run: python tools/run_ci_command.py python -m pytest -q tests/test_control_dependencies.py tests/test_autonomy.py tests/test_autonomy_planner.py tests/test_visual_loop.py tests/test_visual_capture.py tests/test_visual_policy.py tests/test_control_runtime_api.py tests/test_speech_personalization.py
       - run: python tools/run_ci_command.py python tools/build_desktop.py --installer
       - uses: actions/upload-artifact@v4
         with:

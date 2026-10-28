@@ -6,6 +6,7 @@ import { StatusBar } from 'expo-status-bar';
 import { UpdateCard } from './src/UpdateCard';
 import { CloudPanel } from './src/CloudPanel';
 import { VoiceCard } from './src/VoiceCard';
+import { SpeechSettings } from './src/SpeechSettings';
 import { useVoice } from './src/voice';
 import { useReplySpeech } from './src/speech';
 import { StartupGreeting } from './src/startupGreeting';
@@ -252,12 +253,13 @@ function Home() {
       <CloudPanel initialWorkspaceId={workspace?.id || ''} onActivate={() => { void voice.stop(); void speech.stop(); }} />
       <UpdateCard disabled={busy} automatic={automatic} />
       <View style={s.card}><Text style={s.cardText}>回答朗读 · 系统中文音色</Text>
-        <Text style={s.hint}>普通文字对话完整回答后自动朗读，不必开启麦克风；不朗读历史或未完成回复。当前只使用本机离线中文声音，后续可扩展音源选择。</Text>
+        <Text style={s.hint}>普通文字对话完整回答后自动朗读，不必开启麦克风；不朗读历史或未完成回复。本机音色、相对语速和音量可在下方设置。</Text>
         <Button label={speech.known ? `回答朗读：${speech.status.enabled ? '开 · 点击关闭' : '关 · 点击开启'}` : '正在读取朗读配置'}
           disabled={!speech.supported || speech.changing || !speech.known} onPress={() => void speech.configure(!speech.status.enabled)} />
         {speech.speaking && <Button label="停止本次朗读" onPress={() => void speech.stop()} />}
         <Text style={s.hint}>{speech.error || speech.status.message}</Text>
       </View>
+      <SpeechSettings speech={speech} disabled={busy} />
       <VoiceCard voice={voice} disabled={busy} automatic={automatic} onSession={id => { if (!busy) selectSession(id); }} />
       <View style={s.card}><Text style={s.cardText}>主动关怀 · 电脑活动</Text>
         <Text style={s.hint}>在 Windows 电脑的对话栏单独开启后，夏鱼洛可以低频观察电脑屏幕，偶尔提出建议或问题。与鼠标控制分开，不会因此执行操作。此手机不读取其他 App 或手机屏幕；请在电脑查看和管理此功能。</Text>

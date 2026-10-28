@@ -35,8 +35,18 @@ class VoiceModule(private val context: ReactApplicationContext) : ReactContextBa
     }
     @ReactMethod fun speechStatus(promise: Promise) { promise.resolve(SpeechOutput.status().toString()) }
     @ReactMethod fun configureSpeech(enabled: Boolean, promise: Promise) {
-        SpeechOutput.configure(enabled)
-        promise.resolve(SpeechOutput.status().toString())
+        try {
+            SpeechOutput.configure(enabled)
+            promise.resolve(SpeechOutput.status().toString())
+        } catch (_: Exception) { promise.reject("SPEECH_SETTING", "无法保存本机朗读开关，请检查系统存储。") }
+    }
+    @ReactMethod fun speechVoices(promise: Promise) {
+        SpeechOutput.voices({ promise.resolve(it.toString()) },
+            { promise.reject("SPEECH_VOICES", "系统音色尚未就绪，请稍后刷新本机已安装的中文离线音色。") })
+    }
+    @ReactMethod fun configureSpeechPreferences(voiceId: String?, rate: Double, volume: Double, promise: Promise) {
+        SpeechOutput.configurePreferences(voiceId, rate, volume, { promise.resolve(it.toString()) },
+            { promise.reject("SPEECH_PREFERENCES", "声音设置未保存：请在前台选择已安装的中文离线音色，并检查语速、音量与本机存储。") })
     }
     @ReactMethod fun stopSpeech(promise: Promise) {
         SpeechOutput.stop("chat")

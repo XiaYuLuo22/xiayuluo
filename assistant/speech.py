@@ -2,6 +2,7 @@
 from dataclasses import dataclass, field
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -9,6 +10,65 @@ import sys
 from tempfile import NamedTemporaryFile
 from threading import Condition, Event, RLock, Thread
 import time
+from uuid import uuid4
+
+
+DEFAULT_RATE = 180
+DEFAULT_VOLUME = 1.0
+
+
+def _rate(value):
+    if type(value) is not int or not 80 <= value <= 300:
+        raise ValueError('朗读语速必须为80至300之间的整数。')
+    return value
+
+
+def _volume(value):
+    if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1:
+        raise ValueError('朗读音量必须为0至1之间的有限数值。')
+    return float(value)
+
+
+def _languages(raw):
+    if not isinstance(raw, (list, tuple)):
+        raw = [raw]
+    languages = []
+    for item in raw[:16]:
+        if isinstance(item, bytes):
+            item = item.decode('utf-8', errors='ignore')
+        if not isinstance(item, str):
+            continue
+        # Some pyttsx3 backends prefix a language tag with its byte length.
+        item = item.strip(' ' + ''.join(map(chr, range(32)))).replace('_', '-')
+        if re.fullmatch(r'[A-Za-z0-9-]{1,32}', item) and item not in languages:
+            languages.append(item)
+    return languages
+
+
+def _voice_options(raw):
+    if not isinstance(raw, (list, tuple)) or len(raw) > 256:
+        raise ValueError('系统声音列表无效，请检查本机语音设置。')
+    voices, identifiers = [], set()
+    for value in raw:
+        if not isinstance(value, dict):
+            continue
+        identifier, name = value.get('id'), value.get('name')
+        if (not isinstance(identifier, str) or not identifier or len(identifier) > 1024
+                or any(ord(char) < 32 or ord(char) == 127 for char in identifier)
+                or identifier in identifiers or not isinstance(name, str)):
+            continue
+        name = re.sub(r'\s+', ' ', name).strip()[:200]
+        if not name:
+            continue
+        languages = _languages(value.get('languages', []))
+        chinese = value.get('chinese')
+        if type(chinese) is not bool:
+            chinese = (any(tag.casefold().split('-')[0] in {'zh', 'cmn', 'yue'} for tag in languages)
+                       or any(token in name.casefold() for token in ('chinese', 'mandarin', '中文', '普通话')))
+        voices.append({'id': identifier, 'name': name, 'languages': languages, 'chinese': chinese,
+                       'local': True, 'source': 'installed-system'})
+        identifiers.add(identifier)
+    return voices
 
 
 def speech_text(text, limit=3000):
@@ -53,12 +113,17 @@ class _SystemDriver:
 
     def voices(self):
         return [{'id': str(voice.id), 'name': str(voice.name),
+                 'languages': _languages(voice.languages),
                  'chinese': any(name in (str(voice.languages) + str(voice.name)).casefold()
                                 for name in ('zh', 'chinese', '中文'))}
                 for voice in self.engine.getProperty('voices')]
 
     def select(self, voice_id):
         self.engine.setProperty('voice', voice_id)
+
+    def preferences(self, rate, volume):
+        self.engine.setProperty('rate', rate)
+        self.engine.setProperty('volume', volume)
 
     def speak(self, text, cancelled):
         if cancelled():
@@ -92,7 +157,10 @@ class NativeSpeech:
         self.condition = Condition(self.lock)
         self.enabled = True
         self.voice_id = ''
-        self.voices = []
+        self.rate, self.volume = DEFAULT_RATE, DEFAULT_VOLUME
+        self._voice_options = []
+        self.personalization_available = False
+        self._invalid_configuration = False
         self.generation = 0
         self.available = False
         self.phase, self.message, self.reason = 'off', '回复朗读尚未就绪。', ''
@@ -126,26 +194,42 @@ class NativeSpeech:
             if self.path.stat().st_size > 16384:
                 raise ValueError('oversize')
             config = json.loads(self.path.read_text(encoding='utf-8'))
-            if (not isinstance(config, dict) or set(config) != {'schema', 'enabled', 'voice_id'}
-                    or config['schema'] != 1 or type(config['enabled']) is not bool
+            if (not isinstance(config, dict) or not {'schema', 'enabled', 'voice_id'} <= set(config)
+                    or set(config) - {'schema', 'enabled', 'voice_id', 'rate', 'volume'}
+                    or type(config['schema']) is not int or config['schema'] != 1 or type(config['enabled']) is not bool
                     or not isinstance(config['voice_id'], str) or len(config['voice_id']) > 1024):
                 raise ValueError('invalid')
+            rate = _rate(config.get('rate', DEFAULT_RATE))
+            volume = _volume(config.get('volume', DEFAULT_VOLUME))
             self.enabled, self.voice_id = config['enabled'], config['voice_id']
+            self.rate, self.volume = rate, volume
         except (OSError, ValueError, TypeError):
             self.enabled = False
+            self._invalid_configuration = True
             self.warning = '朗读配置损坏，已关闭自动朗读；请在设置重新选择。'
 
-    def _save(self, enabled, voice_id):
+    def _save(self, enabled, voice_id, rate=DEFAULT_RATE, volume=DEFAULT_VOLUME):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = None
+        config = {'schema': 1, 'enabled': enabled, 'voice_id': voice_id}
+        if rate != DEFAULT_RATE or volume != DEFAULT_VOLUME:
+            config.update(rate=rate, volume=volume)
         try:
             with NamedTemporaryFile(mode='w', encoding='utf-8', prefix='.speech-', suffix='.tmp',
                                     dir=self.path.parent, delete=False) as stream:
                 temporary = Path(stream.name)
-                json.dump({'schema': 1, 'enabled': enabled, 'voice_id': voice_id}, stream, ensure_ascii=False)
+                json.dump(config, stream, ensure_ascii=False)
                 stream.flush()
                 os.fsync(stream.fileno())
+            if self._invalid_configuration and self.path.exists():
+                if self.path.is_symlink() or not self.path.is_file():
+                    raise OSError('Invalid configuration is not a regular file.')
+                # Only an explicit settings action repairs a broken config. Keep
+                # its original bytes under an exclusive name before replacing it.
+                backup = self.path.with_name('speech.invalid-' + uuid4().hex + '.json')
+                os.link(self.path, backup, follow_symlinks=False)
             os.replace(temporary, self.path)
+            self._invalid_configuration = False
         finally:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
@@ -155,31 +239,43 @@ class NativeSpeech:
             return {'available': self.available, 'enabled': self.enabled, 'speaking': self.active is not None,
                     'phase': self.phase, 'message': self.warning or self.message, 'reason': self.reason,
                     'engine': 'system', 'voice_id': self.voice_id,
-                    'voices': [{'id': voice['id'], 'name': voice['name']} for voice in self.voices],
+                    'voices': self.voices(), 'rate': self.rate, 'volume': self.volume,
+                    'personalization_available': self.personalization_available,
                     'truncated': self.truncated, 'generation': self.generation}
+
+    def voices(self):
+        """Cached installed voices; never call a COM driver from an API thread."""
+        with self.lock:
+            return [{**voice, 'languages': list(voice['languages'])} for voice in self._voice_options]
 
     def set_activity_callback(self, callback):
         with self.lock:
             self.activity_callback = callback
 
-    def configure(self, enabled, voice_id=None):
+    def configure(self, enabled, voice_id=None, rate=None, volume=None):
         if type(enabled) is not bool:
             raise ValueError('朗读开关必须是布尔值。')
         with self.condition:
             selected = self.voice_id if voice_id is None else voice_id
             if not isinstance(selected, str) or len(selected) > 1024:
                 raise ValueError('音色编号格式不正确。')
-            if selected and selected not in {voice['id'] for voice in self.voices}:
+            if selected and selected not in {voice['id'] for voice in self._voice_options}:
                 raise ValueError('系统中未找到该音色，请刷新后选择。')
+            selected_rate = self.rate if rate is None else _rate(rate)
+            selected_volume = self.volume if volume is None else _volume(volume)
+            if ((rate is not None or volume is not None) and not self.personalization_available):
+                raise ValueError('当前系统驱动不支持语速和音量设置；原设置保持不变。')
             try:
-                self._save(enabled, selected)
+                self._save(enabled, selected, selected_rate, selected_volume)
             except OSError as error:
                 raise ValueError('无法保存朗读设置，原设置保持不变。') from error
-            if (enabled, selected) != (self.enabled, self.voice_id):
+            if (enabled, selected, selected_rate, selected_volume) != (self.enabled, self.voice_id, self.rate, self.volume):
                 self.generation += 1
                 self._cancel_locked()
             self.enabled, self.voice_id = enabled, selected
+            self.rate, self.volume = selected_rate, selected_volume
             self.warning = ''
+            self.message = '朗读设置已保存，下次新回复播放时生效。' if enabled else '回复朗读已关闭；不会重播旧回复。'
             self.condition.notify_all()
             return self.status()
 
@@ -242,12 +338,16 @@ class NativeSpeech:
         driver = None
         try:
             driver = factory()
-            voices = driver.voices()
+            voices = _voice_options(driver.voices())
             chinese = next((voice for voice in voices if voice['chinese']), None)
             if not chinese:
                 raise ValueError('缺少 Windows 系统本地中文声音，请在系统语言/语音设置中安装中文声音。')
             with self.condition:
-                self.voices = voices
+                self._voice_options = voices
+                self.personalization_available = callable(getattr(driver, 'preferences', None))
+                if (not self.personalization_available
+                        and (self.rate != DEFAULT_RATE or self.volume != DEFAULT_VOLUME)):
+                    raise ValueError('当前系统驱动无法应用已保存的语速和音量，原配置保留。')
                 if self.voice_id and self.voice_id not in {voice['id'] for voice in voices}:
                     self.warning = '先前的系统音色不可用，已使用默认中文声音。'
                     self.voice_id = ''
@@ -262,6 +362,7 @@ class NativeSpeech:
                     ticket, self.pending = self.pending, None
                     self.active = ticket
                     voice_id = self.voice_id or chinese['id']
+                    rate, volume = self.rate, self.volume
                     callback = self.activity_callback
                     self.phase, self.message = 'speaking', '正在系统朗读；已暂停语音识别。'
                 try:
@@ -269,7 +370,10 @@ class NativeSpeech:
                         callback(True)
                     if not ticket.cancelled:
                         driver.select(voice_id)
-                        driver.speak(ticket.spoken_text, lambda: ticket.cancelled or self.closing)
+                        if self.personalization_available:
+                            driver.preferences(rate, volume)
+                        if not ticket.cancelled and not self.closing:
+                            driver.speak(ticket.spoken_text, lambda: ticket.cancelled or self.closing)
                 except Exception:
                     ticket.error = '系统朗读失败，请检查系统中文声音和音频输出设备。'
                 finally:

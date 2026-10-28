@@ -13,6 +13,21 @@
 
 Python 依赖通过 `pyproject.toml` 和 `requirements.lock` 管理，包括 FastAPI、Uvicorn、HTTPX、python-dotenv，以及可选 PyAutoGUI、Pillow、pytest、Playwright；这些依赖通过发行包安装，没有复制它们的仓库。测试与运行需要的环境依赖保留在 `.venv` 中。
 
+## 本地视觉与主动决策组件
+
+可选 `control` 依赖组由官方 PyPI 发行包安装，Windows 源码启动器、安装包构建包含此组；Linux开发可显式安装 `.[control]`。导入/安装不启动截图或鼠标，功能仍需在原生 App 明确开启。没有下载预训练权重、训练私人数据或新增云服务。
+
+| 上游 | 锁定版本 | 用途与许可证 |
+| --- | --- | --- |
+| [transitions](https://github.com/pytransitions/transitions) | 0.9.3 | 本地目标/事件状态机，MIT；间接依赖 six 1.17.0（MIT） |
+| [MSS](https://github.com/BoboTiG/python-mss) | 10.2.0 | 本人明确开启后的本地屏幕采集，MIT |
+| [opencv-python-headless](https://github.com/opencv/opencv-python) | 4.14.0.94 | 无Qt界面的图像处理与复核；打包脚本MIT，OpenCV核心Apache-2.0，wheel自带第三方许可 |
+| [NumPy](https://github.com/numpy/numpy) | 2.4.2 | 有界图像数组；BSD-3-Clause及wheel内的第三方许可 |
+
+来源为 `https://pypi.org/project/transitions/0.9.3/`、`https://pypi.org/project/mss/10.2.0/`、`https://pypi.org/project/opencv-python-headless/4.14.0.94/` 与 `https://pypi.org/project/numpy/2.4.2/`。选择OpenCV 4.x而非未经本项目验证的5.x，保留现有NumPy/Pillow和独立训练环境的兼容版本。
+
+OpenCV wheel可包含FFmpeg等额外组件，不能只保留MIT/Apache简称：实际wheel的 `LICENSE.txt`、`LICENSE-3RD-PARTY.txt`（含适用的LGPL文本）必须随发行包保留。构建/源码入口为上游 [opencv-python](https://github.com/opencv/opencv-python) 及其引用的OpenCV/第三方源码；正式分发须结合实际wheel的二进制组成履行适用的源码提供等义务，不能将此简表当作完整许可履行声明。Windows构建从实际安装的distribution收集完整LICENSE/COPYING/NOTICE，按原始相对路径放入 `licenses/<distribution>/`，避免同名许可覆盖；NumPy各子组件的许可亦保留。不需要Qt或其他`cv2`发行变体，不同时安装多个OpenCV wheel。组件本身不表示已达到高频实时控制或真实桌面操作验收。
+
 独立的视觉动作学习实验使用官方 [PyTorch](https://github.com/pytorch/pytorch) 2.14.1+cpu（BSD风格许可及随wheel提供的第三方许可）和 [NumPy](https://github.com/numpy/numpy) 2.4.2（BSD-3-Clause），约束记录在 `requirements-vision.lock`。CPU wheel来自 `https://download.pytorch.org/whl/cpu`，NumPy由PyPI发行包安装；没有复制Neuro/Among Us的GPL代码、模型权重或训练数据，模型结构与合成图像生成器为本项目自行实现。实验代码与权重不加入普通App安装包；若以后分发训练运行环境，仍须保留所安装wheel中的完整许可证和第三方NOTICE，不能只用此说明代替。
 
 桌面 App 使用 [pywebview](https://github.com/r0x0r/pywebview) 6.2.1（BSD-3-Clause）；Windows 使用系统 Microsoft WebView2 和 pythonnet 适配层。构建工具为 [PyInstaller](https://github.com/pyinstaller/pyinstaller) 6.22.3，其 GPL 许可附带允许分发所构建程序的特殊例外。构建脚本会收集已安装依赖的许可证到发行包 `licenses/`，并保留此说明。WebView2 Runtime 通过微软的系统安装方式提供，未随源码包复制或修改。

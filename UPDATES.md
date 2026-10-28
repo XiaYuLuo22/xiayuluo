@@ -1,6 +1,6 @@
 # 夏鱼洛 App 内更新
 
-当前源码0.1.16 / Android versionCode17。仓库已公开，Windows测试安装包已构建，但没有正式签名 Release；按所有者要求暂缓发布配置，**不绕过校验、不更换原签名**。公开源码、构建产物、正式更新与真机验收不是同一状态。
+当前源码0.1.17 / Android versionCode18。仓库已公开，Windows测试安装包以成功的Actions构建产物为准，目前没有正式签名 Release；按所有者要求暂缓发布配置，**不绕过校验、不更换原签名**。公开源码、构建产物、正式更新与真机验收不是同一状态。
 
 <a id="015-客户端完善与发布阻塞"></a>
 
@@ -51,7 +51,7 @@ App内更新遇到已有训练数据时先取得跨进程写锁，建立含datas
 本人私下生成Windows离线包的示例（不上传、不发布、不换密钥）：
 
 ```powershell
-python tools/release.py windows-package --version 0.1.16 --windows Xiayuluo-Windows.zip --notes-file RELEASE_NOTES.md --key-file .release-signing/release-private.pem --output Xiayuluo-0.1.16.xyupdate
+python tools/release.py windows-package --version 0.1.17 --windows Xiayuluo-Windows.zip --notes-file RELEASE_NOTES.md --key-file .release-signing/release-private.pem --output Xiayuluo-0.1.17.xyupdate
 ```
 
 输入须为对应版本构建，输出已存在则拒绝覆盖；包只含签名清单与程序ZIP，不含私钥或用户数据。

@@ -4,7 +4,7 @@ Windows 优先的个人测试 App：独立窗口、日常对话、Codex 编程�
 
 ## 当前开发状态
 
-当前源码 **0.1.16 / Android versionCode 17**。源码仓库公开，Windows 测试安装包已构建；正式在线发布暂缓，不替换签名或绕过校验。没有替你部署云服务、上传私人数据或生成新安卓 APK。构建/自动化测试不等于真机验收。
+当前源码 **0.1.17 / Android versionCode 18**，新增本地语音个性化、明确目标的只读主动决策及影子视觉循环。源码仓库公开，Windows 测试安装包以实际构建结果为准；正式在线发布暂缓，不替换签名或绕过校验。没有替你部署云服务、上传私人数据或生成新安卓 APK。构建/自动化测试不等于真机验收。
 
 | 能力 | 当前范围 |
 | --- | --- |
@@ -12,6 +12,7 @@ Windows 优先的个人测试 App：独立窗口、日常对话、Codex 编程�
 | 手机直连电脑 | HTTPS 配对后共享聊天、记忆和绑定工作区的任务；电脑需保持在线，无手机鼠标遥控 |
 | 独立云工作区 | 可自部署文本同步、离线存储和明确的电脑任务回执；普通云消息仅同步、不自动回复，云语音未实现，见 [CLOUD_SYNC.md](CLOUD_SYNC.md) |
 | 活动感知 | Windows 独立开关，默认关闭；周期观察、短期摘要和概率建议，不理解全部活动，见 [ACTIVITY.md](ACTIVITY.md) |
+| 本机控制实验 | 系统音色/语速/音量选择，明确目标的只读Codex决策，30秒影子视觉观测与实际性能指标；不把建议或影子预测当作鼠标执行，见 [CONTROL_RUNTIME.md](CONTROL_RUNTIME.md) |
 | 视觉动作学习 | 自研 Neuro 思路的“画面＋目标”离线训练/评测，不自动采集、不执行真实鼠标，见 [VISION_LEARNING.md](VISION_LEARNING.md) |
 | 更新与数据 | App 内校验下载安装；仍需正式签名 Release。训练目录与程序分离，更新前校验备份，见 [UPDATES.md](UPDATES.md)、[TRAINING_DATA.md](TRAINING_DATA.md) |
 
@@ -43,7 +44,7 @@ Android 安装记录见 [ANDROID_INSTALL.md](ANDROID_INSTALL.md)，手机配对�
 
 ```powershell
 py -3 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -c requirements.lock -e ".[app,desktop]"
+.\.venv\Scripts\python.exe -m pip install -c requirements.lock -e ".[app,desktop,control,voice]"
 .\.venv\Scripts\python.exe -m assistant
 ```
 
@@ -84,6 +85,12 @@ Windows 聊天栏开启「鼠标控制」后，可发送「请点击设置」「
 开关每次启动默认关，仅明确的本轮鼠标要求临时截图，交给选定的 Codex/视觉 API，结束清理自有图片，不存聊天/记忆。执行前检查2分钟有效期、屏幕尺寸、坐标与41×41目标变化；不符则拒绝，不猜坐标。关闭取消旧规划，重开不恢复旧动作；左上角 PyAutoGUI fail-safe 保留。
 
 安装版首次空白配置启用桌面驱动，源码需 `desktop` 依赖和 `DESKTOP_ENABLED=true`；不覆盖已有显式禁用。管理员/UAC界面、动画或 DPI 差异可能导致拒绝，必须本机验收，不能用云机替身保证真实操作。
+
+## 本地语音与主动决策测试
+
+电脑设置可选择已安装系统音色、语速和音量；这不是声音克隆或新音源下载。主动决策每次默认关，提交明确目标和完成标准后才按事件调用只读Codex，可说话、提问或建议下一步，不自动操作电脑；原鼠标功能仍是一轮一个动作。
+
+视觉循环需原生App与聊天鼠标开关，明确开始后做30秒本地影子观测。1–30Hz是请求频率，界面展示实测值；默认未加载动作模型，无鼠标执行。画面不保存/上传，离线训练模型也不能因此直接控制桌面。使用、组件与限制见 [CONTROL_RUNTIME.md](CONTROL_RUNTIME.md)。
 
 ## 四级记忆
 

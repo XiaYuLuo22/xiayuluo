@@ -18,6 +18,12 @@ iniconfig==2.3.1
 opentelemetry-api==1.45.1
 packaging==26.3
 Pillow==12.3.0
+# Optional local observation and decision runtime; no Torch/model weights in App.
+transitions==0.9.3
+six==1.17.0
+mss==10.2.0
+opencv-python-headless==4.14.0.94
+numpy==2.4.2
 playwright==1.63.0
 pluggy==1.6.0
 pydantic==2.14.0

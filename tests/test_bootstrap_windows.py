@@ -75,7 +75,7 @@ def test_first_start_creates_installs_and_launches_same_python(tmp_path):
     assert launch(root, runner) == 0
     python = str(root / ".venv/Scripts/python.exe")
     assert installs(runner) == [[python, "-m", "pip", "install", "--disable-pip-version-check",
-                                 "-c", "requirements.lock", "-e", ".[app,desktop]"]]
+                                 "-c", "requirements.lock", "-e", ".[app,desktop,control]"]]
     assert runner.commands[-1] == [python, "-m", "assistant"]
     assert (root / ".env").read_text() == "# preserve configuration"
     assert (root / ".assistant/memory.sqlite3").read_bytes() == b"preserve memory"
