@@ -19,8 +19,8 @@ export async function checkUpdate(signal?: AbortSignal): Promise<{ release: Rele
   try {
     // This request is independent of the paired computer, and never carries its token.
     const response = await fetchUpdateResource(manifestUrl(config), abort.signal, fetch);
-    if (response.status === 404) throw new Error('签名更新源尚未发布或当前不可访问，无法下载更新。请待发布源就绪后重试；当前版本保留，不会跳转网页。');
-    if (!response.ok || !response.body) throw new Error('更新检查失败，请稍后重试。');
+    if (response.status === 404) throw new Error('GitHub Releases 尚未发布可验证版本或当前不可访问，无法下载更新。请待 GitHub 签名版本发布后重试；当前版本保留，不会跳转网页。');
+    if (!response.ok || !response.body) throw new Error('GitHub 更新检查失败，请稍后重试；当前版本保留。');
     const reader = response.body.getReader(), decoder = new TextDecoder();
     let text = '', size = 0;
     try {
@@ -35,7 +35,7 @@ export async function checkUpdate(signal?: AbortSignal): Promise<{ release: Rele
     const release = verifyRelease(text, config);
     return { release, available: newer(release.version, currentVersion) && release.android_code > currentCode };
   } catch (error) {
-    if (abort.signal.aborted) throw new Error(signal?.aborted ? '更新检查已取消。' : '更新检查超时，请稍后重试。');
+    if (abort.signal.aborted) throw new Error(signal?.aborted ? 'GitHub 更新检查已取消。' : 'GitHub 更新检查超时，请稍后重试。');
     throw error;
   } finally { clearTimeout(timer); signal?.removeEventListener('abort', cancel); }
 }

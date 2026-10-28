@@ -4,7 +4,7 @@ Windows 优先的个人测试 App：独立窗口、日常对话、Codex 编程�
 
 ## 当前开发状态
 
-当前源码 **0.1.17 / Android versionCode 18**，新增本地语音个性化、明确目标的只读主动决策及影子视觉循环。源码仓库公开，Windows 测试安装包以实际构建结果为准；正式在线发布暂缓，不替换签名或绕过校验。没有替你部署云服务、上传私人数据或生成新安卓 APK。构建/自动化测试不等于真机验收。
+当前源码 **0.1.18 / Android versionCode 19**，更新入口明确为「GitHub 一键更新」：点击后自动从固定 GitHub Releases 下载、校验并安装，不跳转网页，也不需要另建更新服务器。正式签名 Release 尚未就绪，不替换签名或绕过校验；源码推送和 Actions 测试构建不等于可供 App 更新的发布包。Windows 测试包以成功的 Actions 构建为准，尚无新安卓 APK，未部署云服务或上传私人数据；构建/自动化测试不等于真机验收。
 
 | 能力 | 当前范围 |
 | --- | --- |
@@ -14,7 +14,7 @@ Windows 优先的个人测试 App：独立窗口、日常对话、Codex 编程�
 | 活动感知 | Windows 独立开关，默认关闭；周期观察、短期摘要和概率建议，不理解全部活动，见 [ACTIVITY.md](ACTIVITY.md) |
 | 本机控制实验 | 系统音色/语速/音量选择，明确目标的只读Codex决策，30秒影子视觉观测与实际性能指标；不把建议或影子预测当作鼠标执行，见 [CONTROL_RUNTIME.md](CONTROL_RUNTIME.md) |
 | 视觉动作学习 | 自研 Neuro 思路的“画面＋目标”离线训练/评测，不自动采集、不执行真实鼠标，见 [VISION_LEARNING.md](VISION_LEARNING.md) |
-| 更新与数据 | App 内校验下载安装；仍需正式签名 Release。训练目录与程序分离，更新前校验备份，见 [UPDATES.md](UPDATES.md)、[TRAINING_DATA.md](TRAINING_DATA.md) |
+| 更新与数据 | GitHub 一键更新：自动下载校验，Windows 重启替换，Android 仍需系统安装确认；正式签名 Release 尚未就绪。训练目录与程序分离，更新前校验备份，见 [UPDATES.md](UPDATES.md)、[TRAINING_DATA.md](TRAINING_DATA.md) |
 
 公开 GitHub 加密备份与云同步不是同一能力：仅本人显式选择文件、本机加密后上传，明文最多16MiB，密钥不上传；不是自动备份或完整训练云盘，公开历史不可保证撤回。发布阻塞见 [更新配置](UPDATES.md#015-客户端完善与发布阻塞)。
 

@@ -3,7 +3,7 @@
 ## 当前状态与工作方式
 
 - 名称为“夏鱼洛”（Xiayuluo），Windows 原生 App 优先，手机使用 Expo / React Native。默认日常聊天界面，调试信息放入可选开发者模式；状态与指标必须来自实际观察。
-- 当前源码 0.1.17 / Android versionCode 18。仓库已由所有者公开，正式发布配置按要求暂缓；公开源码、Windows 构建、签名 Release、云部署和真机验收是不同状态，不得混称已上线。无新 APK、已部署云服务或真人双端验收。
+- 当前源码 0.1.18 / Android versionCode 19。仓库已由所有者公开，正式发布配置按要求暂缓；公开源码、Windows 构建、签名 Release、云部署和真机验收是不同状态，不得混称已上线。Windows 测试安装包以成功的 Actions 构建为准，无新 APK、已部署云服务或真人双端验收。
 - 从现有 checkout 开发，保留无关改动。重构/清理不删除有效功能、兼容协议或测试，不为精简放宽安全检查。测试应覆盖受影响行为，云端替身不能代替真实模型、Windows 桌面、语音和覆盖升级验收。
 - 可按具体用途复用成熟开源库/插件，核对官方来源、版本和许可证，保留来源记录。前端运行文件由 `tools/frontend-vendor.lock.json` 与 `tools/vendor_frontend.py` 管理，保留 TLS、归档和文件校验；应用运行时不临时从 CDN 下载依赖。
 - 只清理确认来源的生成物、缓存和临时解包目录。保留源码、测试、锁文件、许可证，以及 `.env`、`.assistant/`、运行中的 `.venv/`、editable 安装依赖的 `.egg-info/`、签名材料、旧模型、训练集与历史备份；不得把 `dist/` 或 `.vision-learning/` 整体当垃圾删除。
@@ -48,7 +48,7 @@
 ## 更新与发布
 
 - 正式在线发布暂缓，不绕过签名/系统安装检查、不生成替代身份。保留 `.release-signing/`、`.android-signing/`、固定 Ed25519 公钥及既有 Android 包名/证书；不提交/输出私钥、设备令牌、配置、数据库，不把 GitHub token 内置 App。
-- Windows/Android 点击更新直接检查固定匿名 HTTPS 源、下载、大小/hash/签名及实际 build-info/包身份校验后安装，不回退网页、不降级；源码不可自覆盖。Windows 启动/每小时可见空闲只检查，不静默安装；Android 必须系统确认，返回 App 不代表成功。
+- Windows/Android 的「GitHub 一键更新」点击后自动检查固定 GitHub Releases 匿名 HTTPS 源、下载、大小/hash/签名及实际 build-info/包身份校验后安装，不回退网页、不降级，无需额外更新服务器；源码不可自覆盖，源码推送不是发布包。Windows 启动/每小时可见空闲只检查，不静默安装；Android 必须系统确认，返回 App 不代表成功。
 - Windows helper 来自新签名包，等待旧进程退出、同盘替换，并检查随机 nonce+版本+原生窗口/服务 ACK；失败仅停止自己持有的进程并尝试回滚，不使用 taskkill/PID猜测，文件占用则保留旧版备份报错。helper 写成功结果后以同 nonce/version 的 health-accepted.json 解锁云后台写入/任务执行，避免可回滚窗口写入旧版不理解的数据。
 - 发布前强制原签名存在性预检、Android 实际证书/包名/versionCode 与 Windows build-info 核验；发布后匿名完整下载双资产复核，失败将本次新 Release 退回草稿。check_only 仅检查 Secrets 存在，禁止构建/发布；不能把403/源码推送/单端构建当成功，不移动旧标签掩盖失败。
 - 有客户端改动时桌面/手机版本与 Android versionCode 同步递增；仅文档/无行为清理不冒称新安装包。签名配置、训练备份、目录隔离和数据兼容要求不能为更新而放宽，详见 [UPDATES.md](UPDATES.md)。

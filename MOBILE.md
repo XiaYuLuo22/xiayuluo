@@ -2,7 +2,7 @@
 
 ## 当前范围
 
-`mobile/` 是 Expo / React Native源码，Android、iOS共用界面与协议，不是手机 ChatGPT客户端或桌面网站封装。当前源码 **0.1.17 / Android versionCode 18**；最近实际安卓包仍为 **0.1.12 / code13**，安装、大小及校验集中在 [ANDROID_INSTALL.md](ANDROID_INSTALL.md)。没有新 APK、iOS IPA或真机验收。
+`mobile/` 是 Expo / React Native源码，Android、iOS共用界面与协议，不是手机 ChatGPT客户端或桌面网站封装。当前源码 **0.1.18 / Android versionCode 19**；最近实际安卓包仍为 **0.1.12 / code13**，安装、大小及校验集中在 [ANDROID_INSTALL.md](ANDROID_INSTALL.md)。没有新 APK、iOS IPA或真机验收。
 
 主聊天采用电脑主机模式：手机经 HTTPS配对访问同一份会话/四级记忆，Codex在电脑指定项目执行。开发者模式是同一本机服务的界面，不是跨主机数据库自动合并。电脑须开机、不休眠、联网且服务运行；同连 Wi-Fi或只装 APK不会自动连接。
 
@@ -67,7 +67,7 @@ cd ..
 
 更新必须保持 `com.xiayuluo.assistant`包名、原证书及递增版本码，不生成替代身份或换 debug key。保留 `.android-signing/`、`.release-signing/`与口令，不提交/输出/打包；脚本拒绝覆盖已有 APK。checkout不含环境专用工具链；若当前云机保留 `/workspace/.build-tools/android/run_build.py`适配器，可传新的绝对输出路径使用，新环境仍须验证 CA、网络和工具链。
 
-分发前核验原签名、实际包名/版本/架构、CRC/16KB对齐、内嵌 JS与许可，不含 `.env`、密钥或聊天/设备数据库。App内更新在签名源下载校验后交系统安装，不跳 GitHub；正式在线发布暂缓，见 [UPDATES.md](UPDATES.md)。构建和受控CLI/浏览器测试不等于真机、真实网络/账号、覆盖升级、生产安全或商店验收。
+分发前核验原签名、实际包名/版本/架构、CRC/16KB对齐、内嵌 JS与许可，不含 `.env`、密钥或聊天/设备数据库。设备页「GitHub 一键更新」由App自动从固定GitHub Releases下载校验后交系统安装，不跳转网页；无需配对电脑在线或额外更新服务器，仍须系统确认。正式签名Release尚未就绪，源码推送不能直接更新已安装App，见 [UPDATES.md](UPDATES.md)。构建和受控CLI/浏览器测试不等于真机、真实网络/账号、覆盖升级、生产安全或商店验收。
 
 ## 依赖告警
 

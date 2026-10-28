@@ -583,17 +583,17 @@ async function checkForUpdates(automatic = false) {
   if (automatic && (!state.status?.runtime.update_supported || document.hidden || state.busy)) return;
   lastUpdateCheck = Date.now();
   updateBusy = true; $('#check-update').disabled = true; $('#download-update').disabled = true; $('#install-update').hidden = true;
-  $('#update-status').textContent = '正在检查签名更新清单…'; $('#update-notes').hidden = true;
+  $('#update-status').textContent = '正在检查 GitHub Releases 的签名更新清单…'; $('#update-notes').hidden = true;
   try {
     const result = await json('/api/updates');
     $('#update-status').textContent = result.available
-      ? `发现 ${result.version}，当前 ${result.current}。${result.install_supported ? '可在此下载更新。' : '当前为源码版，请先安装 Windows 发行版。'}`
+      ? `GitHub 已发布 ${result.version}，当前 ${result.current}。${result.install_supported ? '点击后自动从 GitHub 下载、校验并重启更新。' : '当前为源码版，请先安装 Windows 发行版。'}`
       : `当前 ${result.current}，暂无更高版本。`;
     $('#update-notes').textContent = result.notes; $('#update-notes').hidden = !result.notes;
     $('#install-update').hidden = !result.available || !result.install_supported;
     $('#update-available').hidden = !result.available;
     $('#update-available').title = result.available ? `发现 ${result.version}，打开更新设置` : '';
-    if (result.available && automatic) toast(`发现夏鱼洛 ${result.version}，可在设置中更新。`);
+    if (result.available && automatic) toast(`GitHub 已发布夏鱼洛 ${result.version}，可在设置中一键更新。`);
     return result;
   } catch (error) {
     $('#update-status').textContent = error.message;
@@ -609,9 +609,9 @@ document.addEventListener('visibilitychange', () => {
 });
 async function installSignedUpdate() {
   if (updateBusy || state.busy) return toast('请先完成或停止当前任务。');
-  if (!approveLocally('下载并校验新版本，然后退出并重启夏鱼洛？配置、聊天和四级记忆保留，安装位置不变。')) return;
+  if (!approveLocally('从 GitHub 下载并校验新版本，然后退出并重启夏鱼洛？配置、聊天和四级记忆保留，安装位置不变。')) return;
   updateBusy = true; $('#install-update').disabled = true; $('#check-update').disabled = true; $('#download-update').disabled = true;
-  $('#update-status').textContent = '正在备份训练数据并准备下载，请勿关闭 App…';
+  $('#update-status').textContent = '正在备份训练数据，随后从 GitHub 下载签名更新包，请勿关闭 App…';
   const stopProgress = watchUpdateProgress();
   try { await stopSpeech(true); await post('/api/updates/install', { confirm: true }); stopProgress(); $('#update-status').textContent = '安装包已校验，正在重启安装；新版启动成功后才能确认更新完成。'; }
   catch (error) { $('#update-status').textContent = error.message; }

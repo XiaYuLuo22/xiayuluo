@@ -2,7 +2,7 @@
 
 ## 现有安装包
 
-当前源码为 **0.1.17 / versionCode 18**，但最近实际构建的安卓包仍为 **0.1.12 / versionCode 13**。源码新增的云面板和语音个性化不在此旧 APK 中，尚无新版 APK，云服务未部署，详见 [CLOUD_SYNC.md](CLOUD_SYNC.md)、[本地控制运行时](CONTROL_RUNTIME.md)。
+当前源码为 **0.1.18 / versionCode 19**，但最近实际构建的安卓包仍为 **0.1.12 / versionCode 13**。源码新增的云面板和语音个性化不在此旧 APK 中，尚无新版 APK，云服务未部署，详见 [CLOUD_SYNC.md](CLOUD_SYNC.md)、[本地控制运行时](CONTROL_RUNTIME.md)。
 
 - APK：`xiayuluo-0.1.12-android-arm64-final.apk`，77,738,838字节（约74.1 MiB）。
 - 安装 ZIP：`xiayuluo-0.1.12-android-arm64-install.zip`，57,115,228字节（约54.5 MiB），解压后安装其中 APK。
@@ -31,6 +31,6 @@
 
 ## 更新、签名与许可
 
-「设备 → 版本与更新 → 下载更新」在 App内检查固定签名清单、下载校验后交给安卓系统安装，不跳转 GitHub。系统确认不能跳过，返回 App不代表安装成功。当前尚无正式签名 Release，公开源码不代表在线直更可用，见 [UPDATES.md](UPDATES.md)。
+新版源码的「设备 → 版本与更新 → GitHub 一键更新」点击后，由App自动从固定GitHub Releases检查签名清单、下载校验，再交给安卓系统安装，不跳转网页；无需电脑在线或额外更新服务器。旧APK按钮仍可能显示「下载更新」。系统确认不能跳过，返回App不代表安装成功。当前尚无正式签名Release，公开源码不代表在线直更可用，见 [UPDATES.md](UPDATES.md)。
 
 覆盖更新必须保持相同包名、原签名密钥并递增 versionCode。保留 `.android-signing/`、`.release-signing/`，不上传私钥、输出口令或改用 debug key冒充同签名。卸载会清除本机凭据及可能存在的离线数据，但不删除电脑会话。原始许可/NOTICE随包进入 `assets/licenses/`；开发依赖告警与构建步骤见 [MOBILE.md](MOBILE.md)，尚未完成生产安全或商店验收。

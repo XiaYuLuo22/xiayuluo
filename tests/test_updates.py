@@ -45,6 +45,41 @@ def test_release_signature_and_monotonic_version(release, tmp_path, monkeypatch)
         previous = candidate
 
 
+def test_github_check_uses_pinned_release_without_device_or_github_credentials(release, tmp_path, monkeypatch):
+    config, _, sign = release
+    requests = []
+
+    def github(request):
+        requests.append(request)
+        if request.url.host == 'github.com':
+            return httpx.Response(302, headers={
+                'Location': 'https://release-assets.githubusercontent.com/fixture/update.json'})
+        return httpx.Response(200, content=sign())
+
+    with httpx.Client(transport=httpx.MockTransport(github)) as client:
+        monkeypatch.setattr('assistant.updates.fetch_bytes',
+                            lambda *args, **kwargs: fetch_bytes(*args, **kwargs, client=client))
+        result = Updates(tmp_path / 'unused-cache', config=config).check()
+
+    assert result['available'] is True
+    assert str(requests[0].url) == config['manifest_url']
+    assert len(requests) == 2
+    for request in requests:
+        assert request.method == 'GET'
+        assert not any(name in request.headers for name in
+                       ('authorization', 'cookie', 'x-assistant-token', 'x-xiayuluo-voice-device'))
+    assert not (tmp_path / 'unused-cache').exists()  # Checking never downloads or installs an application.
+
+
+def test_current_clients_share_fixed_github_release_source():
+    root = Path(__file__).parents[1]
+    desktop = json.loads((root / 'assistant/update-config.json').read_text())
+    mobile = json.loads((root / 'mobile/src/update-config.json').read_text())
+    assert desktop == mobile
+    assert desktop['repository'] == 'XiaYuLuo22/xiayuluo'
+    assert desktop['manifest_url'] == 'https://github.com/XiaYuLuo22/xiayuluo/releases/latest/download/update.json'
+
+
 def test_signature_tampering_wrong_key_and_oversize(release):
     config, data, sign = release
     for raw in (sign().replace(b'0.2.0', b'9.9.9'), sign() + b' ' * 33000, b'{}', b'[]'):
@@ -212,7 +247,7 @@ def test_no_release_is_not_reported_as_up_to_date(client_factory, monkeypatch):
 
 def test_release_versions_and_pinned_configs_match():
     from tools.release import verify_versions
-    assert verify_versions(__version__) == 18
+    assert verify_versions(__version__) == 19
 
 
 def test_private_download_pages_do_not_need_network_and_require_local_token(client_factory, monkeypatch):

@@ -619,6 +619,7 @@ def test_browser_codex_chat_selector_confirmation_and_no_api(page, browser_app):
     page.locator('#send').click()
     button = page.locator('#messages .action-card button').last
     playwright_api.expect(button).to_be_visible()
+    playwright_api.expect(page.locator('#download-update-note')).to_contain_text('不需要额外云服务器')
     assert not app.state.model_requests
     button.click()
     playwright_api.expect(page.locator('#action-description')).to_contain_text('ChatGPT 登录而非 API 密钥')
@@ -635,7 +636,7 @@ def test_download_update_button_reports_missing_source_without_navigation(page):
     page.route('**/api/updates/install', lambda route: installed.append(route.request))
     original = page.url
     page.locator('[data-view="settings"]').click()
-    button = page.get_by_role('button', name='↓ 下载更新', exact=True)
+    button = page.get_by_role('button', name='↓ GitHub 一键更新', exact=True)
     playwright_api.expect(button).to_be_visible()
     assert button.get_attribute('href') is None
     button.click()
@@ -796,7 +797,7 @@ def test_private_source_mode_never_auto_checks_or_imports_updates(page):
     page.reload()
     page.locator('[data-view="settings"]').click()
     playwright_api.expect(page.locator('#import-update')).to_be_disabled()
-    playwright_api.expect(page.locator('#update-status')).to_contain_text('签名版本')
+    playwright_api.expect(page.locator('#update-status')).to_contain_text('GitHub Releases')
     assert not any(url.endswith('/api/updates') or url.endswith('/api/updates/import') for url in requests)
 
 
@@ -854,7 +855,7 @@ def test_native_startup_checks_updates_without_automatically_installing(page, ou
         playwright_api.expect(badge).to_be_visible()
         badge.click()
         playwright_api.expect(page.locator('#install-update')).to_be_visible()
-        playwright_api.expect(page.locator('#update-status')).to_contain_text('发现 0.2.0')
+        playwright_api.expect(page.locator('#update-status')).to_contain_text('GitHub 已发布 0.2.0')
     else:
         playwright_api.expect(badge).to_be_hidden()
         page.locator('[data-view="settings"]').click()

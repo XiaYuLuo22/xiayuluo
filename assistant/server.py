@@ -762,10 +762,10 @@ def create_app(settings=None, *, memory=None, transport=None):
             return {**result, "install_supported": app.state.install_update is not None}
         except httpx.HTTPStatusError as error:
             if error.response.status_code == 404:
-                raise HTTPException(409, "签名更新源尚未发布或当前不可访问，无法在应用内下载更新。请待发布源就绪后重试；当前版本保留，也可导入本地签名包。") from error
-            raise HTTPException(502, "暂时无法访问更新发布源，请稍后重试。") from error
+                raise HTTPException(409, "GitHub Releases 的签名更新源尚未发布或当前不可访问，无法下载更新。仅推送源码或生成 Actions 测试包不等于正式发布；当前版本保留，也可导入本地签名包，无需额外云服务器。") from error
+            raise HTTPException(502, "暂时无法访问 GitHub 更新发布源，请稍后重试。") from error
         except httpx.HTTPError as error:
-            raise HTTPException(502, "更新检查网络失败，请稍后重试；当前版本不受影响。") from error
+            raise HTTPException(502, "GitHub 更新检查网络失败，请稍后重试；当前版本不受影响。") from error
         except ValueError as error:
             raise HTTPException(409, str(error)) from error
 

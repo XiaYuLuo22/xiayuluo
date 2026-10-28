@@ -1,6 +1,8 @@
-# 夏鱼洛 App 内更新
+# 夏鱼洛 GitHub 一键更新
 
-当前源码0.1.17 / Android versionCode18。仓库已公开，Windows测试安装包以成功的Actions构建产物为准，目前没有正式签名 Release；按所有者要求暂缓发布配置，**不绕过校验、不更换原签名**。公开源码、构建产物、正式更新与真机验收不是同一状态。
+当前源码0.1.18 / Android versionCode19。点击「GitHub 一键更新」后，App自动从固定GitHub Releases获取签名清单与安装包，不跳转浏览器、不要求本人去GitHub手动下载，也无需另建更新服务器。Windows校验后重启替换，Android交系统确认覆盖安装。
+
+仓库已公开，但目前没有正式签名Release；Windows测试包以成功的Actions构建产物为准，尚无新安卓APK。发布配置仍暂缓，**不绕过校验、不更换原签名**；公开源码、构建产物、正式更新与真机验收不是同一状态。
 
 <a id="015-客户端完善与发布阻塞"></a>
 
@@ -19,8 +21,8 @@
 
 ## 使用方式
 
-- **Windows发行版**：设置 → 版本与更新 → 下载更新。先完成/停止聊天和Codex；点击后检查固定签名源、下载校验、重启替换，保留原安装位置。启动及每小时可见空闲只检查，不静默安装或降级。
-- **Android**：设备 → 版本与更新 → 下载更新。不依赖配对电脑在线；系统要求时授予安装未知应用权限，最终仍需本人确认覆盖安装，不卸载旧版。安装成功以重启后的真实版本为准。
+- **Windows发行版**：设置 → 版本与更新 → GitHub 一键更新。先完成/停止聊天和Codex；点击后检查固定GitHub签名源、下载校验、重启替换，保留原安装位置。启动及每小时可见空闲只检查，不静默安装或降级。
+- **Android**：设备 → 版本与更新 → GitHub 一键更新。不依赖配对电脑在线；系统要求时授予安装未知应用权限，最终仍需本人确认覆盖安装，不卸载旧版。安装成功以重启后的真实版本为准。旧版按钮可能仍名为「下载更新」。
 - **Windows离线包**：设置 → 版本与更新 → 选择更新包并重启，由原生文件选择器选择 `.xyupdate`；取消保留当前版。HTTP不接受任意文件路径，手机/源码版不能使用本机导入。
 - **源码/iOS**：源码可检查版本但不能自覆盖checkout、`.venv`或配置；需手动更新源码或先装Windows发行版。iOS尚无此安装更新流程。
 
@@ -51,7 +53,7 @@ App内更新遇到已有训练数据时先取得跨进程写锁，建立含datas
 本人私下生成Windows离线包的示例（不上传、不发布、不换密钥）：
 
 ```powershell
-python tools/release.py windows-package --version 0.1.17 --windows Xiayuluo-Windows.zip --notes-file RELEASE_NOTES.md --key-file .release-signing/release-private.pem --output Xiayuluo-0.1.17.xyupdate
+python tools/release.py windows-package --version 0.1.18 --windows Xiayuluo-Windows.zip --notes-file RELEASE_NOTES.md --key-file .release-signing/release-private.pem --output Xiayuluo-0.1.18.xyupdate
 ```
 
 输入须为对应版本构建，输出已存在则拒绝覆盖；包只含签名清单与程序ZIP，不含私钥或用户数据。
@@ -69,4 +71,4 @@ python tools/release.py windows-package --version 0.1.17 --windows Xiayuluo-Wind
 
 0.1.1开始支持签名清单；0.1.3增加下载按钮，当时的浏览器回退已被0.1.11替代；0.1.9增加图形安装器、自动检查与本机离线包；0.1.13增加训练数据保护；0.1.15/0.1.16完善健康确认与云写入屏障。旧“私有仓库/跳网页/逐次批准”说明不覆盖当前行为，版本摘要见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
 
-Windows测试安装包已成功构建，回归覆盖签名/篡改、版本/URL/大小/哈希、重定向、解压保护、目录保留、启动失败/回滚、鉴权、更新期间阻止新任务与训练数据保留；手机协议/TypeScript与脚本导出通过。尚未用户Windows/Android真机覆盖升级验收，不能保证任意系统/网络/故障状态下更新必定成功。实际Android包记录见 [ANDROID_INSTALL.md](ANDROID_INSTALL.md)，独立构建不等于正式在线发布。
+上一版0.1.17的Windows测试安装包已成功构建；0.1.18的新包以实际Actions结果为准。本轮132项更新相关Python回归、67项手机测试及TypeScript检查通过；回归覆盖签名/篡改、版本/URL/大小/哈希、重定向、解压保护、目录保留、启动失败/回滚、鉴权、更新期间阻止新任务与训练数据保留。尚未用户Windows/Android真机覆盖升级验收，不能保证任意系统/网络/故障状态下更新必定成功。实际Android包记录见 [ANDROID_INSTALL.md](ANDROID_INSTALL.md)，独立构建不等于正式在线发布。
