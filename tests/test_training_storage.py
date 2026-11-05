@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 import threading
+from types import SimpleNamespace
 import uuid
 
 import pytest
@@ -304,6 +305,50 @@ def test_concurrent_initialization_of_same_root_succeeds_for_both_instances(stor
     with ThreadPoolExecutor(max_workers=2) as pool:
         assert list(pool.map(initialize, [store, second])) == [store.root, store.root]
     assert json.loads(location.read_text())['root'] == str(store.root)
+
+
+@pytest.mark.parametrize('existing', [b'', b'\0'])
+def test_windows_lock_initializes_byte_only_after_acquiring_mandatory_lock(tmp_path, monkeypatch, existing):
+    path = tmp_path / 'fixture.lock'
+    path.write_bytes(existing)
+    held, calls = set(), []
+    real_fdopen = storage.os.fdopen
+
+    class GuardedStream:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+        def write(self, content):
+            assert self.fileno() in held, 'Windows mandatory lock rejects pre-acquisition writes'
+            calls.append('write')
+            return self.stream.write(content)
+
+        def flush(self):
+            assert self.fileno() in held, 'Windows mandatory lock rejects pre-acquisition flushes'
+            calls.append('flush')
+            return self.stream.flush()
+
+    def locking(descriptor, mode, size):
+        assert size == 1 and storage.os.lseek(descriptor, 0, storage.os.SEEK_CUR) == 0
+        if mode == 1:
+            calls.append('lock')
+            held.add(descriptor)  # Windows permits a range beyond an empty file's EOF.
+        else:
+            assert mode == 2 and descriptor in held
+            calls.append('unlock')
+            held.remove(descriptor)
+
+    monkeypatch.setattr(storage, 'sys', SimpleNamespace(platform='win32'))
+    monkeypatch.setitem(sys.modules, 'msvcrt', SimpleNamespace(locking=locking, LK_NBLCK=1, LK_UNLCK=2))
+    monkeypatch.setattr(storage.os, 'fdopen', lambda *args, **kwargs: GuardedStream(real_fdopen(*args, **kwargs)))
+    with storage._file_lock(path):
+        assert held
+        assert path.read_bytes() == b'\0'
+    assert not held
+    assert calls == (['lock', 'write', 'flush', 'unlock'] if not existing else ['lock', 'unlock'])
 
 
 def test_concurrent_different_roots_cannot_replace_first_registration(tmp_path, location):

@@ -145,9 +145,6 @@ def _file_lock(path, *, timeout=5):
     try:
         if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
             raise ValueError('训练写锁不是普通文件。')
-        if os.fstat(stream.fileno()).st_size == 0:
-            stream.write(b'\0')
-            stream.flush()
         while not acquired:
             try:
                 stream.seek(0)
@@ -162,6 +159,12 @@ def _file_lock(path, *, timeout=5):
                 if time.monotonic() - started >= timeout:
                     raise ValueError('训练数据正在写入或备份，未能取得锁；请稍后再试。')
                 time.sleep(.03)
+        # Windows byte locks may extend past EOF. Initialize only after taking
+        # the lock: another process may already own byte 0 when this stream was
+        # opened, and its mandatory lock would reject a pre-lock write/flush.
+        if os.fstat(stream.fileno()).st_size == 0:
+            stream.write(b'\0')
+            stream.flush()
         yield
     finally:
         try:
