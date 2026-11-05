@@ -75,24 +75,31 @@ def test_off_by_default_native_unavailable_and_strict_enable():
     assert not unavailable.status()['enabled']
 
 
-def test_observation_interval_is_independent_of_notice_probability():
-    samples = iter([0.9, 0.1])
-    assistant, clock, planner, captures = fixture(random=lambda: next(samples))
+def test_new_useful_events_are_immediate_without_random_or_fixed_speech_interval():
+    def never_random():
+        raise AssertionError('Useful new content must not be discarded by a random timer')
+    assistant, clock, planner, captures = fixture(random=never_random)
     assistant.set_enabled(True)
     assert asyncio.run(assistant.tick()) is None
-    clock.advance()
-    assert asyncio.run(assistant.tick()) is None
+    clock.advance(2)
+    first = asyncio.run(assistant.tick())
+    assert first['kind'] == 'question'
     assert len(captures) == len(planner.calls) == 1
-    clock.advance(29)
+    clock.advance(1)
     assert asyncio.run(assistant.tick()) is None
     assert len(captures) == 1
-    clock.advance(91)
+    clock.advance(1)
+    planner.result = {'kind': 'comment', 'message': '这次改动已经有清晰的验证线索了。'}
     notice = asyncio.run(assistant.tick())
-    assert notice == {'id': 1, 'generation': 1, 'kind': 'question', 'message': '需要我帮你整理一下思路吗？'}
+    assert notice == {'id': 2, 'generation': 1, 'kind': 'comment', 'message': planner.result['message']}
     assert len(captures) == len(planner.calls) == 2
-    assert assistant.events(0) == [notice]
-    assert assistant.events(1) == []
-    assert 'png' not in assistant.status() and 'message' not in assistant.events(1)
+    assert assistant.events(0) == [first, notice]
+    assert assistant.events(1) == [notice]
+    assert assistant.events(2) == []
+    assert 'png' not in assistant.status() and 'message' not in assistant.events(2)
+    assert assistant.status()['cadence'] == 'event-driven'
+    assert assistant.status()['fixed_speech_interval'] is False
+    assert assistant.status()['cooldown_seconds'] == 0
 
 
 def test_only_transient_text_is_kept_and_off_or_expiry_removes_notices():
@@ -105,6 +112,7 @@ def test_only_transient_text_is_kept_and_off_or_expiry_removes_notices():
     clock.advance(assistant.EVENT_TTL)
     assert assistant.events() == []
     clock.advance()
+    planner.result = {'kind': 'comment', 'message': '这一处可以先检查验证结果。'}
     asyncio.run(assistant.tick())
     assert assistant.events()
     assistant.set_enabled(False)
@@ -114,25 +122,45 @@ def test_only_transient_text_is_kept_and_off_or_expiry_removes_notices():
     assert not any(isinstance(value, bytes) for value in vars(assistant).values())
 
 
-def test_cooldown_and_three_notice_hourly_cap_survive_toggle():
+def test_resource_burst_limit_survives_toggle_without_fixed_speech_cooldown():
     assistant, clock, planner, captures = fixture()
     assistant.set_enabled(True)
-    clock.advance()
-    for index in range(3):
+    for index in range(assistant.BURST_BUDGET):
+        clock.advance(2)
+        planner.result = {'kind': 'comment', 'message': f'这是新的活动线索{index}。'}
         assert asyncio.run(assistant.tick())['id'] == index + 1
-        clock.advance(599)
-        assert asyncio.run(assistant.tick()) is None
-        clock.advance(120)
-    assert len(planner.calls) == len(captures) == 6
+    clock.advance(2)
+    assert asyncio.run(assistant.tick()) is None
+    assert len(planner.calls) == 6 and len(captures) == 7
+    assert assistant.status()['phase'] == 'limited'
     assistant.set_enabled(False)
     assistant.set_enabled(True)
-    clock.advance()
+    clock.advance(2)
     assert asyncio.run(assistant.tick()) is None
-    assert len(captures) == 7
-    clock.advance(3600)
-    assert asyncio.run(assistant.tick())['id'] == 4
-    assert assistant.status()['max_analyses_per_hour'] == 12
-    assert assistant.status()['max_notices_per_hour'] == 3
+    assert len(captures) == 8 and len(planner.calls) == 6
+    clock.advance(60)
+    planner.result = {'kind': 'question', 'message': '这次想先检查哪个新结果？'}
+    assert asyncio.run(assistant.tick())['id'] == 7
+    assert assistant.status()['max_analyses_per_hour'] == 60
+    assert assistant.status()['max_notices_per_hour'] == 60
+
+
+def test_repeated_message_or_same_semantic_activity_does_not_create_fake_novelty():
+    assistant, clock, planner, _ = fixture()
+    assistant.set_enabled(True)
+    clock.advance(2)
+    assert asyncio.run(assistant.tick())
+    clock.advance(2)
+    planner.result['message'] = '需要我帮你整理一下思路吗!'
+    assert asyncio.run(assistant.tick()) is None
+    planner.result = {'kind': 'comment', 'message': '这个验证方向很清晰。',
+                      'category': 'coding', 'activity': '正在检查测试结果。'}
+    clock.advance(2)
+    assert asyncio.run(assistant.tick())
+    planner.result['message'] = '可以沿着这个思路看看。'
+    clock.advance(2)
+    assert asyncio.run(assistant.tick()) is None
+    assert len(assistant.events()) == 2
 
 
 def test_identical_screen_and_model_noop_do_not_create_messages():
@@ -248,6 +276,31 @@ def test_background_failure_is_generic_and_does_not_disable_chat_or_expose_scree
     assert assistant.status()['phase'] == 'attention'
     assert 'secret' not in str(assistant.status()) and assistant.enabled
     assert not assistant.events()
+
+
+def test_error_backoff_is_resource_protection_and_survives_toggle():
+    assistant, clock, planner, _ = fixture()
+    calls = []
+
+    async def fail(*args):
+        calls.append(True)
+        raise RuntimeError('private provider error')
+
+    planner.plan = fail
+    assistant.set_enabled(True)
+    clock.advance(2)
+    assert asyncio.run(assistant.tick()) is None
+    clock.advance(2)
+    assert asyncio.run(assistant.tick()) is None
+    assert len(calls) == 2 and assistant.status()['retry_after_seconds'] == 4
+    assistant.set_enabled(False)
+    assistant.set_enabled(True)
+    clock.advance(2)
+    assert asyncio.run(assistant.tick()) is None
+    assert len(calls) == 2 and len(assistant.attempts) == 2
+    clock.advance(2)
+    assert asyncio.run(assistant.tick()) is None
+    assert len(calls) == 3 and assistant.status()['retry_after_seconds'] == 8
 
 
 class ScreenDriver:

@@ -100,12 +100,24 @@ async function refreshSpeech() {
 }
 async function stopSpeech(quiet = false) {
   const version = ++speechVersion;
+  let backgroundStopped = true;
+  if (nativeControlOwner() && proactiveKnown && proactiveState.enabled) {
+    try {
+      const info = await post('/api/proactive/interrupt');
+      if (version !== speechVersion) return null;
+      acceptProactive(info);
+      clearProactiveNotices();
+    } catch (error) {
+      backgroundStopped = false;
+      if (!quiet) toast(`后台插话停止未确认：${error.message}`);
+    }
+  }
   if (!speechKnown) await refreshSpeech();
   if (speechKnown && !speechState.available && !speechState.speaking) return null;
   try {
     const info = await post('/api/speech/stop');
     if (version !== speechVersion) return null;
-    acceptSpeech(info); return speechState.generation;
+    acceptSpeech(info); return backgroundStopped ? speechState.generation : null;
   }
   catch (error) {
     if (version === speechVersion) { speechKnown = false; renderSpeech(); }
@@ -426,7 +438,7 @@ function transientNotice(kind, text, id) {
   const container = $('#assistant-notices');
   const notice = el('article', `assistant-notice ${kind === 'greeting' ? 'startup-greeting' : 'proactive-notice'}`);
   notice.dataset.noticeId = String(id);
-  const title = kind === 'greeting' ? '夏鱼洛 · 问候' : kind === 'question' ? '夏鱼洛 · 随口问问' : '夏鱼洛 · 主动建议';
+  const title = kind === 'greeting' ? '夏鱼洛 · 问候' : kind === 'question' ? '夏鱼洛 · 随口问问' : kind === 'comment' ? '夏鱼洛 · 随口聊聊' : '夏鱼洛 · 主动建议';
   const heading = el('div', 'assistant-notice-heading');
   const dismiss = el('button', 'text-button', '×');
   dismiss.type = 'button'; dismiss.setAttribute('aria-label', `关闭${title}`);
@@ -447,19 +459,14 @@ function renderProactive() {
   button.disabled = proactiveChanging || unavailable;
   $('#proactive-setting').checked = !!enabled;
   $('#proactive-setting').disabled = proactiveChanging || unavailable;
-  const interval = Number.isFinite(proactiveState.interval_seconds) ? proactiveState.interval_seconds : 120;
-  const probability = Number.isFinite(proactiveState.probability) ? Math.round(proactiveState.probability * 100) : 30;
-  const cooldown = Number.isFinite(proactiveState.cooldown_seconds) ? proactiveState.cooldown_seconds : 600;
-  const limit = Number.isFinite(proactiveState.max_analyses_per_hour) ? proactiveState.max_analyses_per_hour : 3;
-  const suggestions = Number.isFinite(proactiveState.max_notices_per_hour) ? proactiveState.max_notices_per_hour : 3;
   const provider = proactiveState.provider === 'codex' ? 'Codex · ChatGPT 登录' : proactiveState.provider === 'api' ? '所配置的视觉 API' : '当前所选引擎';
   const note = proactiveChanging ? '正在更新本机主动建议授权…'
     : !proactiveKnown ? '主动建议状态未核实，观察可能仍在运行；点击开关可请求关闭。'
-    : enabled ? `${proactiveState.message || '已开启前台窗口观察。'} 使用${provider}；每 ${interval} 秒检查活动变化，每小时最多 ${limit} 次分析；${probability}% 概率提出建议，间隔至少 ${cooldown} 秒，每小时最多 ${suggestions} 次建议。${proactivePollError}`
+    : enabled ? `${proactiveState.message || '已开启前台窗口观察。'} 使用${provider}；根据新变化和对话空档决定是否插话，不按固定时间发言。你的输入和停止优先。${proactivePollError}`
     : proactiveState.available ? '主动建议已关闭，不会为此功能读取屏幕。开启后才会间歇读取当前前台窗口。'
     : proactiveState.reason || '主动建议暂不可用；不会假装正在观察。';
   $('#proactive-note').textContent = note;
-  $('#proactive-status').textContent = `${proactiveState.phase ? `状态：${proactiveState.phase} · ` : ''}${note}`;
+  $('#proactive-status').textContent = note;
   button.title = note;
   if (!enabled) $('#activity-context').textContent = '活动感知已关闭；短期活动上下文已清除。';
 }
@@ -493,7 +500,8 @@ async function setProactive(enabled, provider = state.provider) {
   if (enabled && (!proactiveKnown || !proactiveState.available)) return;
   proactiveChanging = true; const version = ++proactiveVersion; renderProactive();
   try {
-    const info = await post('/api/proactive', { enabled, ...(enabled ? { provider } : {}) });
+    const info = await post('/api/proactive', { enabled,
+      ...(enabled ? { provider, ...(state.session ? { session_id: state.session } : {}) } : {}) });
     if (version === proactiveVersion) acceptProactive(info);
     if (info.enabled !== enabled) throw new Error('服务未接受主动建议设置。');
   } catch (error) {
@@ -509,7 +517,8 @@ function toggleProactive() {
   return setProactive(proactiveKnown && !proactiveState.enabled);
 }
 async function pollProactive() {
-  if (!state.token || !proactiveKnown || !proactiveState.enabled || proactiveChanging || proactivePolling || document.hidden) return;
+  if (!state.token || !proactiveKnown || !proactiveState.enabled || proactiveChanging || proactivePolling ||
+      document.hidden || state.busy || typingHintDesired) return;
   proactivePolling = true;
   const version = proactiveVersion;
   try {
@@ -523,7 +532,7 @@ async function pollProactive() {
     if (!Array.isArray(result.events) || !Number.isInteger(result.cursor) || result.cursor < proactiveCursor) throw new Error('提醒列表格式无效。');
     const seen = new Set();
     for (const item of result.events) {
-      if (!item || item.generation !== generation || !Number.isInteger(item.id) || item.id <= proactiveCursor || item.id > result.cursor || seen.has(item.id) || !['suggestion', 'question'].includes(item.kind)) continue;
+      if (!item || item.generation !== generation || !Number.isInteger(item.id) || item.id <= proactiveCursor || item.id > result.cursor || seen.has(item.id) || !['suggestion', 'question', 'comment'].includes(item.kind)) continue;
       seen.add(item.id);
       transientNotice(item.kind, item.message, item.id);
     }
@@ -534,7 +543,7 @@ async function pollProactive() {
 }
 $('#proactive-control').addEventListener('click', guarded(toggleProactive));
 $('#proactive-setting').addEventListener('change', guarded(toggleProactive));
-setInterval(() => void pollProactive(), 5000);
+setInterval(() => void pollProactive(), 1000); // Fetch only already-produced notices, never request model inference.
 
 let greetingKnown = false, greetingBusy = false;
 async function claimGreeting() {
@@ -915,6 +924,7 @@ async function consumeStream(path, body, target) {
 async function sendMessage(event) {
   event.preventDefault(); if (state.busy || state.mouseChanging) return;
   const prompt = $('#prompt').value.trim(); if (!prompt) return;
+  stopTypingHint();
   const session = await ensureSession();
   $('#prompt').value = '';
   message('user', prompt);
@@ -1157,6 +1167,43 @@ $('#chat-provider').addEventListener('change', guarded(async () => {
   if (!state.busy && proactiveKnown && proactiveState.enabled) await setProactive(true, state.provider);
 }));
 $('#session-search').addEventListener('input', renderSessions);
+
+// Only a boolean leaves the native owner UI. This is a brief courtesy lease,
+// not a keystroke log or an instruction to start a model/screen operation.
+let typingHintDesired = false, typingHintSent = false, typingHintPending = false;
+let typingHintLastTrue = -Infinity, typingHintIdle, typingHintRenew;
+async function sendTypingHint(typing) {
+  typingHintDesired = typing;
+  if (!nativeControlOwner() || !state.token || typingHintPending) return;
+  if (!typing && !typingHintSent) return;
+  if (typing && performance.now() - typingHintLastTrue < 1000) {
+    clearTimeout(typingHintRenew);
+    typingHintRenew = setTimeout(() => { if (typingHintDesired) void sendTypingHint(true); },
+      Math.max(1, 1000 - (performance.now() - typingHintLastTrue)));
+    return;
+  }
+  typingHintPending = true; typingHintSent = typing;
+  if (typing) typingHintLastTrue = performance.now();
+  try { await post('/api/interaction', { typing }); }
+  catch { /* Unsupported/briefly offline hosts must not break ordinary typing. */ }
+  finally {
+    typingHintPending = false;
+    if (typingHintDesired !== typing) void sendTypingHint(typingHintDesired);
+  }
+}
+function stopTypingHint() {
+  clearTimeout(typingHintIdle); clearTimeout(typingHintRenew);
+  void sendTypingHint(false);
+}
+$('#prompt').addEventListener('input', () => {
+  clearTimeout(typingHintIdle);
+  if (!nativeControlOwner() || !$('#prompt').value) return stopTypingHint();
+  void sendTypingHint(true);
+  typingHintIdle = setTimeout(stopTypingHint, 1500);
+});
+$('#prompt').addEventListener('blur', stopTypingHint);
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopTypingHint(); });
+window.addEventListener('pagehide', stopTypingHint);
 
 $('#chat-form').addEventListener('submit', guarded(sendMessage));
 $('#prompt').addEventListener('keydown', (event) => {

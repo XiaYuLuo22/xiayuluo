@@ -2,9 +2,11 @@
 
 ## 当前范围
 
-`mobile/` 是 Expo / React Native源码，Android、iOS共用界面与协议，不是手机 ChatGPT客户端或桌面网站封装。当前源码 **0.1.18 / Android versionCode 19**；最近实际安卓包仍为 **0.1.12 / code13**，安装、大小及校验集中在 [ANDROID_INSTALL.md](ANDROID_INSTALL.md)。没有新 APK、iOS IPA或真机验收。
+`mobile/` 是 Expo / React Native源码，Android、iOS共用界面与协议，不是手机 ChatGPT客户端或桌面网站封装。当前源码 **0.1.19 / Android versionCode 20**；最近实际安卓包仍为 **0.1.12 / code13**，安装、大小及校验集中在 [ANDROID_INSTALL.md](ANDROID_INSTALL.md)。没有新 APK、iOS IPA或真机验收。
 
 主聊天采用电脑主机模式：手机经 HTTPS配对访问同一份会话/四级记忆，Codex在电脑指定项目执行。开发者模式是同一本机服务的界面，不是跨主机数据库自动合并。电脑须开机、不休眠、联网且服务运行；同连 Wi-Fi或只装 APK不会自动连接。
+
+0.1.19设备页优先显示配对、语音、朗读和更新入口；音色参数、工作区诊断、云配置与长说明默认折叠。折叠只改变显示，保留输入和组件状态，不开始/停止服务；停止监听、停止朗读与取消更新始终可操作。电脑的活动接话不因手机折叠页而开启，手机仍没有电脑观察权限。
 
 0.1.16已有独立云面板、持久离线文本及电脑云任务执行源码，但服务未部署，也未进入现有旧 APK。它与主聊天直连分开，普通云消息只同步、不自动回复，云语音未实现；不自动上传私人数据或创建托管账号，详见 [CLOUD_SYNC.md](CLOUD_SYNC.md)。
 

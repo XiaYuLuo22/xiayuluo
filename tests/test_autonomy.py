@@ -68,7 +68,7 @@ async def test_missing_planner_is_honest_and_does_not_consume_events_or_budget()
     assert await runtime.next_decision() is None
     status = runtime.status()
     assert status['needs_planner'] and status['available'] and not status['usable']
-    assert status['pending_events'] == 1 and status['budget_remaining'] == 12
+    assert status['pending_events'] == 1 and status['budget_remaining'] == 60
     assert '尚未连接' in status['message'] and runtime.export()['decisions'] == []
 
 
@@ -130,13 +130,13 @@ async def test_invalid_or_executable_planner_output_blocks_without_leaking_detai
     clock.advance(15)
     assert not runtime.observe('activity', 'new', 'second')
     assert await runtime.next_decision() is None and calls == [True]
-    assert runtime.status()['budget_remaining'] == 11
+    assert runtime.status()['budget_remaining'] == 59
 
 
 async def test_intervals_and_hourly_budget_survive_goal_changes_and_switches():
     calls = []
     async def plan(goal, event): calls.append(event['id']); return {'kind': 'wait', 'message': ''}
-    runtime, clock = controller(plan, max_decisions_per_hour=2)
+    runtime, clock = controller(plan, min_interval=15, max_decisions_per_hour=2)
     for identifier in ('first', 'second'): runtime.observe('activity', identifier, identifier)
     await runtime.next_decision()
     assert await runtime.next_decision() is None and calls == ['first']
@@ -216,7 +216,7 @@ async def test_planner_timeout_and_sync_failure_are_sanitized_and_not_retried():
     runtime, _ = controller(plan, planner_timeout=1)
     runtime.observe('activity', 'first', 'first')
     assert await runtime.next_decision() is None and cleaned.is_set()
-    assert runtime.status()['phase'] == 'blocked' and runtime.status()['budget_remaining'] == 11
+    assert runtime.status()['phase'] == 'blocked' and runtime.status()['budget_remaining'] == 59
     def broken(goal, event): raise RuntimeError('private-key-and-path')
     other, _ = controller(broken)
     other.observe('activity', 'test', 'event')
@@ -259,3 +259,98 @@ async def test_goal_and_proposal_limits_stop_instead_of_looping():
     await other.close()
     assert not other.status()['available']
     with pytest.raises(ValueError): other.enable(True)
+
+
+async def test_new_events_can_be_considered_immediately_without_a_speech_timer():
+    calls = []
+    async def plan(goal, event):
+        calls.append(event['id'])
+        return {'kind': 'speak', 'message': event['summary']}
+    runtime, clock = controller(plan)
+    for identifier in ('第一个新进展', '第二个新进展'):
+        assert runtime.observe('activity', identifier, f'event-{len(calls)}')
+        result = await runtime.next_decision()
+        assert result is not None and result['message'] == identifier
+    assert clock() == 1000 and len(calls) == 2
+    status = runtime.status()
+    assert status['cadence'] == 'event-driven' and status['min_interval_seconds'] == 0
+    assert not status['timer_prompts'] and status['budget_remaining'] == 58
+    # Time passing alone is not a reason to manufacture another sentence.
+    clock.advance(1000)
+    assert await runtime.next_decision() is None and len(calls) == 2
+
+
+async def test_consumed_event_content_is_not_requeued_with_a_fresh_identifier():
+    calls = []
+    async def plan(goal, event):
+        calls.append(event['id'])
+        return {'kind': 'wait', 'message': ''}
+    runtime, clock = controller(plan)
+    assert runtime.observe('activity', 'Test   result available', 'first')
+    await runtime.next_decision()
+    assert not runtime.observe('activity', 'test result available', 'different-id')
+    assert not runtime.observe('activity', 'anything else', 'first')
+    assert await runtime.next_decision() is None and calls == ['first']
+    clock.advance(runtime.event_ttl)
+    assert runtime.observe('activity', 'test result available', 'later-new-event')
+    assert await runtime.next_decision() is not None
+    assert calls == ['first', 'later-new-event']
+
+
+async def test_repeated_speech_is_suppressed_across_new_events_goals_and_switches():
+    seen_goals = []
+    replies = iter(('报告出来了，要一起看看吗？', '报告出来了，要一起看看吗?',
+                    '报告出来了， 要一起看看吗？', '报告出来了，要一起看看吗？'))
+    async def plan(goal, event):
+        seen_goals.append(goal)
+        return {'kind': 'ask', 'message': next(replies)}
+    runtime, clock = controller(plan)
+    runtime.observe('activity', '首个测试结果', 'first')
+    assert await runtime.next_decision() is not None
+    runtime.observe('activity', '另一项新测试结果', 'second')
+    assert await runtime.next_decision() is None
+    assert len(runtime.export()['decisions']) == 1 and runtime.status()['phase'] == 'waiting'
+    assert seen_goals[1]['recent_utterances'] == ['报告出来了，要一起看看吗？']
+    assert 'recent_utterances' not in runtime.export()['goal']
+    runtime.enable(False); runtime.enable(True)
+    runtime.new_goal('另一个明确目标', '核实结果')
+    runtime.observe('activity', '新目标的进展', 'third')
+    assert await runtime.next_decision() is None
+    assert runtime.status()['budget_remaining'] == 57
+    # Expiry only permits reconsideration when another new event really arrives.
+    clock.advance(runtime.REPEAT_TTL)
+    assert await runtime.next_decision() is None
+    runtime.observe('activity', '新的报告', 'fourth')
+    assert await runtime.next_decision() is not None
+
+
+async def test_burst_ceiling_does_not_create_a_cadence_or_reset_on_switches():
+    calls = []
+    async def plan(goal, event):
+        calls.append(event['id'])
+        return {'kind': 'wait', 'message': ''}
+    runtime, clock = controller(plan, max_decisions_per_minute=2)
+    for identifier in ('first', 'second', 'third'):
+        runtime.observe('activity', identifier, identifier)
+    assert await runtime.next_decision() is not None
+    assert await runtime.next_decision() is not None
+    assert await runtime.next_decision() is None and calls == ['first', 'second']
+    assert runtime.status()['pending_events'] == 1
+    assert runtime.status()['burst_budget_remaining'] == 0
+    runtime.enable(False); runtime.enable(True)
+    runtime.new_goal('新的明确目标', '提供可验证结果')
+    runtime.observe('activity', 'fourth', 'fourth')
+    assert await runtime.next_decision() is None and len(calls) == 2
+    clock.advance(60)
+    assert await runtime.next_decision() is not None and calls[-1] == 'fourth'
+    assert runtime.status()['budget_remaining'] == 57
+    assert await runtime.next_decision() is None
+
+
+@pytest.mark.parametrize('options', [
+    {'min_interval': -1}, {'min_interval': True}, {'min_interval': float('nan')},
+    {'max_decisions_per_minute': 0}, {'max_decisions_per_minute': 61},
+    {'max_decisions_per_minute': True}, {'max_decisions_per_hour': 61},
+])
+def test_event_driven_resource_parameters_are_strictly_bounded(options):
+    with pytest.raises(ValueError): AutonomyController(**options)

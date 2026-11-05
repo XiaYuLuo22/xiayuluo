@@ -4,6 +4,7 @@ import { cancelUpdate, checkUpdate, currentVersion, getUpdateState, installUpdat
   openInstallPermissionSettings, reopenInstaller, subscribeUpdateState } from './updates';
 import type { Release } from './updateProtocol';
 import { downloadUpdate } from './downloadUpdate';
+import { SettingsDetails } from './SettingsDetails';
 
 export function UpdateCard({ disabled, automatic }: { disabled: boolean; automatic: boolean }) {
   const [release, setRelease] = useState<Release | null>(null);
@@ -83,6 +84,8 @@ export function UpdateCard({ disabled, automatic }: { disabled: boolean; automat
     {cancellable && <Pressable accessibilityRole="button" onPress={() => { checking.current?.abort(); cancelUpdate(); }} style={{ paddingVertical: 12 }}><Text style={{ color: '#46895f' }}>取消检查或下载</Text></Pressable>}
     {installation.cached && <Pressable accessibilityRole="button" disabled={busy || disabled} onPress={() => void resume()} style={{ paddingVertical: 12 }}><Text style={{ color: '#46895f' }}>再次打开安装器（重新校验）</Text></Pressable>}
     {installation.cached && Platform.OS === 'android' && <Pressable accessibilityRole="button" disabled={busy} onPress={() => void permissions()} style={{ paddingVertical: 12 }}><Text style={{ color: '#46895f' }}>检查安装未知应用权限</Text></Pressable>}
-    <Text style={{ color: '#738267', marginTop: 10, fontSize: 12, lineHeight: 20 }}>点击后自动从固定 GitHub Releases 检查、下载并校验，不跳转网页，无需电脑在线或另建更新服务器。有可用签名新版才交给安卓系统安装器；系统安装确认不能跳过。GitHub 尚未发布可验证版本、不可访问或校验失败时保留当前版；返回 App 不代表已经安装成功。{release ? ` 已发现 ${release.version}。` : ''}</Text>
+    <SettingsDetails title="更新来源、校验与安装说明">
+      <Text style={{ color: '#738267', marginTop: 10, fontSize: 12, lineHeight: 20 }}>点击后自动从固定 GitHub Releases 检查、下载并校验，不跳转网页，无需电脑在线或另建更新服务器。有可用签名新版才交给安卓系统安装器；系统安装确认不能跳过。GitHub 尚未发布可验证版本、不可访问或校验失败时保留当前版；返回 App 不代表已经安装成功。{release ? ` 已发现 ${release.version}。` : ''}</Text>
+    </SettingsDetails>
   </View>;
 }

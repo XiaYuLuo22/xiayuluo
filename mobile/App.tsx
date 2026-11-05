@@ -7,6 +7,7 @@ import { UpdateCard } from './src/UpdateCard';
 import { CloudPanel } from './src/CloudPanel';
 import { VoiceCard } from './src/VoiceCard';
 import { SpeechSettings } from './src/SpeechSettings';
+import { SettingsDetails } from './src/SettingsDetails';
 import { useVoice } from './src/voice';
 import { useReplySpeech } from './src/speech';
 import { StartupGreeting } from './src/startupGreeting';
@@ -247,33 +248,46 @@ function Home() {
       {!tasks.length && <Text style={s.empty}>{online ? '暂时没有待确认任务' : '电脑离线时不执行任务'}</Text>}
     </ScrollView>}
     {tab === 'devices' && <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.page}>
-      <Text style={s.eyebrow}>YOUR DEVICES</Text><Text style={s.title}>随身聊，接着做</Text>
-      <Text style={s.description}>手机、电脑、开发者模式，共用同一份对话与四级记忆。仅与你主动配对的电脑连接。</Text>
-      <WorkspaceCard workspace={workspace} online={online} />
-      <CloudPanel initialWorkspaceId={workspace?.id || ''} onActivate={() => { void voice.stop(); void speech.stop(); }} />
-      <UpdateCard disabled={busy} automatic={automatic} />
-      <View style={s.card}><Text style={s.cardText}>回答朗读 · 系统中文音色</Text>
-        <Text style={s.hint}>普通文字对话完整回答后自动朗读，不必开启麦克风；不朗读历史或未完成回复。本机音色、相对语速和音量可在下方设置。</Text>
-        <Button label={speech.known ? `回答朗读：${speech.status.enabled ? '开 · 点击关闭' : '关 · 点击开启'}` : '正在读取朗读配置'}
-          disabled={!speech.supported || speech.changing || !speech.known} onPress={() => void speech.configure(!speech.status.enabled)} />
-        {speech.speaking && <Button label="停止本次朗读" onPress={() => void speech.stop()} />}
-        <Text style={s.hint}>{speech.error || speech.status.message}</Text>
-      </View>
-      <SpeechSettings speech={speech} disabled={busy} />
-      <VoiceCard voice={voice} disabled={busy} automatic={automatic} onSession={id => { if (!busy) selectSession(id); }} />
-      <View style={s.card}><Text style={s.cardText}>主动关怀 · 电脑活动</Text>
-        <Text style={s.hint}>在 Windows 电脑的对话栏单独开启后，夏鱼洛可以低频观察电脑屏幕，偶尔提出建议或问题。与鼠标控制分开，不会因此执行操作。此手机不读取其他 App 或手机屏幕；请在电脑查看和管理此功能。</Text>
-      </View>
-      {connection ? <View style={s.card}><Text style={s.cardText}>{connection.name}</Text><Text selectable style={s.hint}>{connection.url}</Text>
-        <Text style={s.hint}>凭据保存在系统安全存储，不同步模型密钥。解除本机配对不会删除电脑数据。</Text>
-        <Button label="解除本机配对" disabled={busy} onPress={() => automatic ? void disconnect() : Alert.alert('解除配对？', '清除此手机凭据。电脑中可另行撤销访问权限。', [{ text: '取消' }, { text: '解除', style: 'destructive', onPress: () => void disconnect() }])} /></View> : <View style={s.card}>
-        <Text style={s.cardText}>连接你的电脑</Text><Text style={s.hint}>先在电脑「设备与同步」生成 5 分钟有效的一次性配对邀请。同步服务需要 HTTPS，不能直接填写电脑的 localhost。</Text>
+      <Text style={s.eyebrow}>SETTINGS</Text><Text style={s.title}>设置与设备</Text>
+      <Text style={s.description}>常用开关直接操作，连接、声音和隐私细节按需展开。</Text>
+      {connection ? <View style={s.card}><Text style={s.cardText}>{connection.name} · {online ? '电脑已连接' : '电脑未连接'}</Text>
+        <SettingsDetails title="连接地址与配对管理">
+          <Text selectable style={s.hint}>{connection.url}</Text>
+          <Text style={s.hint}>凭据保存在系统安全存储，不同步模型密钥。解除本机配对不会删除电脑数据。</Text>
+          <Button label="解除本机配对" disabled={busy} onPress={() => automatic ? void disconnect() : Alert.alert('解除配对？', '清除此手机凭据。电脑中可另行撤销访问权限。', [{ text: '取消' }, { text: '解除', style: 'destructive', onPress: () => void disconnect() }])} />
+        </SettingsDetails>
+      </View> : <View style={s.card}>
+        <Text style={s.cardText}>连接你的电脑</Text><Text style={s.hint}>填写电脑 HTTPS 地址和一次性邀请。</Text>
         <TextInput style={s.input} value={url} onChangeText={setUrl} placeholder="https://你的同步服务域名" autoCapitalize="none" autoCorrect={false} keyboardType="url" accessibilityLabel="同步服务地址" />
         <TextInput style={s.input} value={name} onChangeText={setName} placeholder="手机名称" maxLength={60} accessibilityLabel="手机名称" />
         <TextInput style={s.input} value={code} onChangeText={setCode} placeholder="粘贴电脑生成的配对邀请" autoCapitalize="none" autoCorrect={false} secureTextEntry accessibilityLabel="一次性配对邀请" />
         <Button label={busy ? '正在配对…' : '安全配对'} onPress={() => void connect()} disabled={busy || !ready || !url.trim() || !code.trim()} />
+        <SettingsDetails title="首次配对说明">
+          <Text style={s.hint}>先在电脑「设备与同步」生成 5 分钟有效的一次性配对邀请。同步服务需要 HTTPS，不能直接填写电脑的 localhost；仅与你主动配对的电脑连接。</Text>
+        </SettingsDetails>
       </View>}
-      <View style={s.card}><Text style={s.cardText}>同步边界</Text><Text style={s.hint}>电脑是当前版本的主机，需要保持运行。手机不存储完整聊天档案，前台每 5 秒刷新；流式回复实时接收。断网草稿仅暂存在当前运行页面，退出后不保证保留。暂无云端账号同步或后台推送。</Text></View>
+      <VoiceCard voice={voice} disabled={busy} automatic={automatic} onSession={id => { if (!busy) selectSession(id); }} />
+      <View style={s.card}><Text style={s.cardText}>回答朗读 · 系统中文音色</Text>
+        <Button label={speech.known ? `回答朗读：${speech.status.enabled ? '开 · 点击关闭' : '关 · 点击开启'}` : '正在读取朗读配置'}
+          disabled={!speech.supported || speech.changing || !speech.known} onPress={() => void speech.configure(!speech.status.enabled)} />
+        {speech.speaking && <Button label="停止本次朗读" onPress={() => void speech.stop()} />}
+        <Text style={s.hint}>{speech.error || speech.status.message}</Text>
+        <SettingsDetails title="朗读方式与隐私说明">
+          <Text style={s.hint}>普通文字对话完整回答后自动朗读，不必开启麦克风；不朗读历史或未完成回复。本机音色、相对语速和音量可在下方设置。</Text>
+        </SettingsDetails>
+      </View>
+      <SpeechSettings speech={speech} disabled={busy} />
+      <UpdateCard disabled={busy} automatic={automatic} />
+      <WorkspaceCard workspace={workspace} online={online} />
+      <View style={s.card}>
+        <SettingsDetails title="主动关怀与同步边界">
+          <Text style={s.cardText}>主动关怀 · 电脑活动</Text>
+          <Text style={s.hint}>在 Windows 电脑的对话栏单独开启后，夏鱼洛根据新活动和相关性决定是否插话、提出建议或问题。与鼠标控制分开，不会因此执行操作。此手机不读取其他 App 或手机屏幕；请在电脑查看和管理此功能。</Text>
+          <Text style={s.cardText}>同步边界</Text>
+          <Text style={s.hint}>手机、电脑、开发者模式，共用电脑上的对话与四级记忆。电脑需要保持运行；主聊天前台每 5 秒刷新，流式回复实时接收。断网草稿仅暂存在当前运行页面，退出后不保证保留。下方独立云工作区另需服务配置，暂无云端账号同步或后台推送。</Text>
+        </SettingsDetails>
+      </View>
+      <CloudPanel initialWorkspaceId={workspace?.id || ''} onActivate={() => { void voice.stop(); void speech.stop(); }} />
     </ScrollView>}
     <View style={s.tabBar}>{tabs.map(([id, icon, label]) => <Pressable key={id} style={s.tab} accessibilityRole="tab" accessibilityState={{ selected: tab === id }} onPress={() => setTab(id)}><Text style={[s.tabIcon, tab === id && s.active]}>{icon}</Text><Text style={[s.tabLabel, tab === id && s.active]}>{label}</Text></Pressable>)}</View>
     <Modal visible={history} animationType="slide" onRequestClose={() => setHistory(false)}><SafeAreaView style={s.safe}>
@@ -287,10 +301,13 @@ function Home() {
 }
 function WorkspaceCard({ workspace, online }: { workspace: Workspace | null; online: boolean }) {
   return <View style={s.card}><Text style={s.cardText}>共享电脑工作区 · {workspace?.name || '等待连接'}</Text>
-    <Text selectable style={s.hint}>编号：{workspace?.id || '未设置项目目录'}</Text>
-    <Text style={s.hint}>{!online ? '电脑未连接，显示的信息可能已过期。' : !workspace?.configured ? '请在电脑配置 CODEX_WORKSPACE，并重启服务。' : workspace.available ? '目录与 CLI 已找到；登录及额度需实际执行验证。' : 'Codex CLI 尚未就绪，请在电脑安装并登录。'}</Text>
-    <Text style={s.hint}>{workspace?.sandbox === 'workspace-write' ? '项目可写。' : '只读检查 · 不允许修改项目。'} {workspace?.approvals === 'automatic' ? '默认同意，指令直接执行；可在电脑设置改回逐次确认。' : '电脑逐次确认。'} 日常问答不读取此项目。</Text>
-    <Text style={s.hint}>与电脑「设备与同步」核对相同编号。手机不能更改电脑目录或执行权限。</Text>
+    <Text style={s.hint}>{!online ? '电脑未连接，显示的信息可能已过期。' : workspace?.available ? '工作区可用' : '工作区尚未就绪'} · {workspace?.sandbox === 'workspace-write' ? '项目可写' : '只读检查'}</Text>
+    <SettingsDetails title="核对工作区编号与执行权限">
+      <Text selectable style={s.hint}>编号：{workspace?.id || '未设置项目目录'}</Text>
+      <Text style={s.hint}>{!workspace?.configured ? '请在电脑配置 CODEX_WORKSPACE，并重启服务。' : workspace.available ? '目录与 CLI 已找到；登录及额度需实际执行验证。' : 'Codex CLI 尚未就绪，请在电脑安装并登录。'}</Text>
+      <Text style={s.hint}>{workspace?.approvals === 'automatic' ? '默认同意，指令直接执行；可在电脑设置改回逐次确认。' : '电脑逐次确认。'} 日常问答不读取此项目。</Text>
+      <Text style={s.hint}>与电脑「设备与同步」核对相同编号。手机不能更改电脑目录或执行权限。</Text>
+    </SettingsDetails>
   </View>;
 }
 function Button({ label, onPress, disabled = false }: { label: string; onPress: () => void; disabled?: boolean }) {

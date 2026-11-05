@@ -1,5 +1,6 @@
 import { Alert, Pressable, Text, View } from 'react-native';
 import type { VoiceController } from './voice';
+import { SettingsDetails } from './SettingsDetails';
 
 export function VoiceCard({ voice, disabled, automatic, onSession }: { voice: VoiceController; disabled: boolean; automatic: boolean; onSession(id: string): void }) {
   const { status, busy } = voice;
@@ -12,7 +13,9 @@ export function VoiceCard({ voice, disabled, automatic, onSession }: { voice: Vo
       <Text style={{ color: '#fff' }}>{busy ? '正在开启…' : status.running ? '停止监听' : '手动开启语音'}</Text>
     </Pressable>
     {!!status.session_id && <Pressable accessibilityRole="button" onPress={() => onSession(status.session_id!)} style={{ paddingVertical: 12 }}><Text style={{ color: '#46895f' }}>查看语音对话</Text></Pressable>}
+    <SettingsDetails title="语音权限、后台与隐私说明">
     {voice.supported && <Pressable accessibilityRole="button" onPress={() => void voice.powerSettings().catch(() => Alert.alert('后台运行设置', '请到系统设置 → 应用 → 夏鱼洛 → 电池，手动允许后台运行/不限电量。'))} style={{ paddingVertical: 12 }}><Text style={{ color: '#46895f' }}>后台运行设置{status.battery_exempt ? ' · 已豁免系统电池优化' : ' · 尚未豁免系统电池优化'}</Text></Pressable>}
     <Text style={{ color: '#738267', marginTop: 10, fontSize: 12, lineHeight: 20 }}>夏鱼洛会先在聊天页向你打招呼；配对电脑在线且权限/本地语音就绪时自动尝试语音对话，不用呼唤名字。麦克风状态以实际提示和常驻通知为准。监听期间，每句最终识别的文字都会连同上下文和相关记忆经电脑发送给 Codex；不保存或上传环境录音，但周围人说话也可能被识别，请在私密环境使用。说“结束对话”或“停止监听”会关闭麦克风，本次不会自动重启；再次使用请手动开启。首次仍需系统授权，拒绝或出错后本次不反复重试。回答时暂停识别，不支持语音打断。后台受系统省电、强制停止和麦克风占用限制，不能保证永不中断。</Text>
+    </SettingsDetails>
   </View>;
 }

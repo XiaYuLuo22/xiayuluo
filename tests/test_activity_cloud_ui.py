@@ -8,6 +8,7 @@ def test_activity_summary_is_plain_text_not_executable_or_saved(page):
         'items': [{'category': 'coding', 'activity': text, 'age_seconds': 12}],
         'read_only': True, 'ephemeral': True}))
     page.locator('[data-view="settings"]').click()
+    page.locator('#proactive-details > summary').click()
     page.locator('#refresh-activity-context').click()
     playwright_api.expect(page.locator('#activity-context')).to_contain_text(text)
     assert page.locator('#activity-context img, #activity-context script').count() == 0

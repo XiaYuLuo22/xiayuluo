@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from assistant.autonomy_planner import AutonomyPlanner, _DecisionCodex
+from assistant.autonomy_planner import AutonomyPlanner, DECISION_PROMPT, _DecisionCodex
 from assistant.config import Settings
 
 
@@ -23,6 +23,12 @@ def test_decision_cli_is_read_only_tool_free_and_does_not_inherit_service_keys(t
     assert 'OPENAI_API_KEY' not in engine.execution_environment()
     assert 'CLOUD_SYNC_DEVICE_TOKEN' not in engine.execution_environment()
     assert engine.execution_environment()['PROJECT_OPTION'] == 'retained'
+
+
+def test_planner_guides_natural_event_driven_remarks_without_fabricated_activity():
+    assert '一两句' in DECISION_PROMPT and '不按固定时间找话说' in DECISION_PROMPT
+    assert 'recent_utterances' in DECISION_PROMPT and '没有新信息就保持安静' in DECISION_PROMPT
+    assert '不编造活动或用户心情' in DECISION_PROMPT
 
 
 async def test_decision_uses_only_explicit_goal_and_untrusted_event_and_cleans_schema():

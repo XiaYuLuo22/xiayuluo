@@ -35,27 +35,33 @@ class AutonomyController:
     """Bounded event-driven decisions, never a scheduler or action executor."""
     MAX_EVENTS = 32
     MAX_HISTORY = 20
+    REPEAT_TTL = 300
 
     def __init__(self, planner=None, *, eligible=lambda: True, clock=time.monotonic,
-                 min_interval=15, event_ttl=120, planner_timeout=30,
-                 max_decisions_per_hour=12, max_proposals=20, max_goal_age=3600):
+                 min_interval=0, event_ttl=120, planner_timeout=30,
+                 max_decisions_per_hour=60, max_decisions_per_minute=6,
+                 max_proposals=20, max_goal_age=3600):
         if (type(max_decisions_per_hour) is not int or not 1 <= max_decisions_per_hour <= 60
+                or type(max_decisions_per_minute) is not int or not 1 <= max_decisions_per_minute <= 60
                 or type(max_proposals) is not int or not 1 <= max_proposals <= 100
                 or any(type(value) not in (int, float) or not math.isfinite(value)
                        for value in (min_interval, event_ttl, planner_timeout, max_goal_age))
-                or not 1 <= min_interval <= 3600 or not 1 <= event_ttl <= 900
+                or not 0 <= min_interval <= 3600 or not 1 <= event_ttl <= 900
                 or not 1 <= planner_timeout <= 120 or not 1 <= max_goal_age <= 86400
                 or (planner is not None and not callable(planner))):
             raise ValueError('主动决策参数无效。')
         self.planner, self.eligible, self.clock = planner, eligible, clock
         self.min_interval, self.event_ttl, self.planner_timeout = min_interval, event_ttl, planner_timeout
         self.max_decisions_per_hour, self.max_proposals, self.max_goal_age = max_decisions_per_hour, max_proposals, max_goal_age
+        self.max_decisions_per_minute = max_decisions_per_minute
         self.enabled = self.closed = False
         self.generation = 0
         self.goal = None
         self.events = deque(maxlen=self.MAX_EVENTS)
         self.history = deque(maxlen=self.MAX_HISTORY)
         self.seen = deque(maxlen=self.MAX_EVENTS * 4)
+        self.event_signatures = deque(maxlen=self.MAX_EVENTS * 4)
+        self.spoken = deque(maxlen=self.MAX_EVENTS)
         self.budget = deque()
         self.last_started = None
         self.task = None
@@ -106,6 +112,7 @@ class AutonomyController:
         self.generation += 1
         self.events.clear()
         self.seen.clear()
+        self.event_signatures.clear()
         self._cancel(self.task)
 
     def _prune(self, now):
@@ -114,6 +121,10 @@ class AutonomyController:
             self.dropped_events += 1
         while self.budget and now - self.budget[0] >= 3600:
             self.budget.popleft()
+        while self.event_signatures and now - self.event_signatures[0][0] >= self.event_ttl:
+            self.event_signatures.popleft()
+        while self.spoken and now - self.spoken[0][0] >= self.REPEAT_TTL:
+            self.spoken.popleft()
 
     def enable(self, enabled):
         if type(enabled) is not bool:
@@ -164,14 +175,15 @@ class AutonomyController:
                 return False
             now = self._now()
             self._prune(now)
-            if event_id in self.seen or (self.events and
-                    (self.events[-1]['kind'], self.events[-1]['summary']) == (kind, summary)):
+            signature = (kind, re.sub(r'\s+', ' ', summary).casefold())
+            if event_id in self.seen or any(item[1:] == signature for item in self.event_signatures):
                 return False
             if len(self.events) == self.MAX_EVENTS:
                 self.dropped_events += 1
             self.events.append({'id': event_id, 'kind': kind, 'summary': summary, 'created_at': now,
                                 'untrusted': True, 'authorizes_execution': False})
             self.seen.append(event_id)
+            self.event_signatures.append((now, *signature))
             return True
 
     @staticmethod
@@ -205,12 +217,19 @@ class AutonomyController:
             if self.planner is None:
                 self._set_phase('waiting', '尚未连接只读决策规划器，事件仅在内存排队，不会假装自主执行。')
                 return None
+            # These are resource/storm ceilings, not a timer that makes the
+            # assistant speak. A genuinely new event can be considered as soon
+            # as the previous decision finishes; silence never queues a retry.
+            burst_used = sum(now - started < 60 for started in self.budget)
             if (not self.events or len(self.budget) >= self.max_decisions_per_hour
+                    or burst_used >= self.max_decisions_per_minute
                     or (self.last_started is not None and now - self.last_started < self.min_interval)):
                 return None
             event = self.events.popleft()
             generation = self.generation
             goal = deepcopy(self.goal)
+            if self.spoken:
+                goal['recent_utterances'] = [text for _, _, text in list(self.spoken)[-5:]]
             self.budget.append(now)
             self.last_started = now
             self._set_phase('thinking', '正在根据明确目标和不可信事件做只读判断，尚未执行操作。')
@@ -233,6 +252,12 @@ class AutonomyController:
                     self.dropped_events += 1
                     self._set_phase('waiting', '决策对应事件已过期，结果已丢弃，不自动重放。')
                     return None
+                if value['kind'] in {'speak', 'ask'}:
+                    signature = re.sub(r'[\W_]+', '', value['message'].casefold())
+                    if any(signature == previous for _, previous, _ in self.spoken):
+                        self._set_phase('waiting', '这句话刚说过，已保持安静；等待值得回应的新变化。')
+                        return None
+                    self.spoken.append((now, signature, value['message']))
                 decision = {**value, 'id': uuid4().hex, 'goal_id': goal['id'], 'event_id': event['id'],
                             'created_at': now, 'source': 'read-only-planner', 'execution_permitted': False,
                             'completion_verified': False, 'requires_explicit_execution': True}
@@ -295,7 +320,8 @@ class AutonomyController:
 
     def status(self):
         with self.lock:
-            self._prune(self._now())
+            now = self._now()
+            self._prune(now)
             goal = None if self.goal is None else {key: self.goal[key] for key in
                 ('id', 'status', 'proposed_steps', 'completion_verified', 'execution_permitted')}
             return {'available': self.machine is not None and not self.closed,
@@ -304,6 +330,11 @@ class AutonomyController:
                     'needs_planner': self.planner is None, 'generation': self.generation, 'goal': goal,
                     'pending_events': len(self.events), 'dropped_events': self.dropped_events,
                     'budget_remaining': max(0, self.max_decisions_per_hour - len(self.budget)),
+                    'max_decisions_per_hour': self.max_decisions_per_hour,
+                    'max_decisions_per_minute': self.max_decisions_per_minute,
+                    'burst_budget_remaining': max(0, self.max_decisions_per_minute -
+                        sum(now - started < 60 for started in self.budget)),
+                    'cadence': 'event-driven', 'timer_prompts': False,
                     'min_interval_seconds': self.min_interval, 'event_ttl_seconds': self.event_ttl,
                     'scope': 'explicit-goal-read-only-decisions', 'executes_actions': False,
                     'persistent': False, 'replays_events': False}

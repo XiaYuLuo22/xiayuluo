@@ -107,6 +107,33 @@ def test_chat_mouse_auto_executes_one_real_action_and_only_reports_result(client
     assert records == []
 
 
+@pytest.mark.parametrize('message', ['回到桌面', '请帮我显示桌面'])
+def test_desktop_goal_routes_to_one_fresh_visual_plan(client_factory, message):
+    client, records = client_factory(approval_mode='auto')
+    driver = ready_desktop(client)
+    enable(client)
+    calls = stub_plan(client)
+    session = client.post('/api/sessions').json()['id']
+    result = events(chat(client, session, message=message))
+    assert result[-1]['type'] == 'done'
+    assert len(calls) == 1 and calls[0][0] == message
+    assert driver.clicks == [(30, 40, 'left')]
+    assert not records and not client.app.state.desktop.snapshots
+
+
+def test_desktop_goal_without_visible_entry_reports_noop_not_false_success(client_factory):
+    client, records = client_factory(approval_mode='auto')
+    driver = ready_desktop(client)
+    enable(client)
+    calls = stub_plan(client, action='noop', message='当前截图没有可确认的显示桌面入口；本轮不能使用键盘快捷键。')
+    session = client.post('/api/sessions').json()['id']
+    result = events(chat(client, session, message='回到桌面'))
+    text = ''.join(item.get('text', '') for item in result)
+    assert len(calls) == 1 and '未执行鼠标操作' in text and '不能使用键盘' in text
+    assert '已执行' not in text and driver.clicks == []
+    assert not records and not client.app.state.desktop.snapshots
+
+
 def test_chat_mouse_manual_keeps_proposal_until_approval(client_factory):
     client, _ = client_factory()
     driver = ready_desktop(client)

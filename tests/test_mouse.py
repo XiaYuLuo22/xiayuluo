@@ -9,7 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from assistant.config import Settings
-from assistant.mouse import MouseArguments, MouseControl, MousePlan, MousePlanner, _VisualCodex
+from assistant.mouse import MouseArguments, MouseControl, MousePlan, MousePlanner, PLAN_PROMPT, _VisualCodex
 from assistant.tools import Desktop
 from conftest import model_stream
 from test_tools import FakeDesktop
@@ -63,6 +63,27 @@ def test_quoted_button_label_is_an_instruction_but_discussion_is_not():
     assert MouseControl.is_request('请帮我点击“设置”按钮')
     assert not MouseControl.is_request('我正在研究点击事件')
     assert not MouseControl.is_request('他说点击这里')
+
+
+@pytest.mark.parametrize('text', ['回到桌面', '回桌面', '帮我回到桌面', '请返回桌面。',
+                                 '现在切回电脑桌面', '用鼠标显示桌面', 'Please show the desktop',
+                                 'Go back to the desktop.', 'return to desktop'])
+def test_explicit_desktop_goal_uses_visual_mouse_planning(text):
+    assert MouseControl.is_request(text)
+
+
+@pytest.mark.parametrize('text', ['你能回到桌面吗', '可以回桌面吗', '如何回到桌面', '不要回到桌面',
+                                 '我刚回到桌面', '回到桌面是什么意思', '回到桌面以后再做什么',
+                                 '如果回到桌面', '他说回到桌面', 'Can you show the desktop',
+                                 'Show the desktop?', 'Explain show desktop'])
+def test_desktop_discussion_never_authorizes_a_screenshot(text):
+    assert not MouseControl.is_request(text)
+
+
+def test_desktop_goal_never_prompts_a_keyboard_or_guessed_taskbar_shortcut():
+    assert '不得凭屏幕尺寸猜任务栏角落坐标' in PLAN_PROMPT
+    assert '改用 Win+D 等键盘快捷键' in PLAN_PROMPT
+    assert '没有可确认入口或需要多步时用 noop' in PLAN_PROMPT
 
 
 @pytest.mark.parametrize('extra', [{'x': True}, {'x': 1.5}, {'scroll': 20}, {'scroll': 1},

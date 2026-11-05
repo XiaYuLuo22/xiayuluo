@@ -38,7 +38,7 @@ def test_context_rejects_unknown_categories_and_duplicate_is_refreshed_not_appen
     assert len(context.context()) == 1
 
 
-def test_activity_summary_works_when_notice_probability_is_zero():
+def test_activity_summary_is_available_when_planner_chooses_silence():
     assistant, clock, planner, captures = fixture(random=lambda: 1)
     planner.result = {'kind': 'none', 'message': '', 'category': 'coding', 'activity': '正在查看代码和测试结果。'}
     assistant.set_enabled(True)
@@ -53,16 +53,19 @@ def test_activity_summary_works_when_notice_probability_is_zero():
     assert assistant.context() == []
 
 
-def test_local_screen_change_detection_does_not_upload_every_frame():
+def test_local_screen_change_detection_only_uploads_changed_frames_not_clock_ticks():
     assistant, clock, planner, captures = fixture()
     planner.result = {'kind': 'none', 'message': '', 'category': 'writing', 'activity': '正在修改一段文档。'}
     assistant.set_enabled(True)
+    assistant.capture = lambda: (captures.append(True) or
+        {'width': 200, 'height': 120, 'png': b'unchanged'})
     for _ in range(5):
-        clock.advance(30)
+        clock.advance(2)
         asyncio.run(assistant.tick())
-    assert len(captures) == 5 and len(planner.calls) == 2
-    assert assistant.status()['interval_seconds'] == 30
-    assert assistant.status()['analysis_interval_seconds'] == 120
+    assert len(captures) == 5 and len(planner.calls) == 1
+    assert assistant.status()['interval_seconds'] == 2
+    assert assistant.status()['analysis_interval_seconds'] == 0
+    assert assistant.status()['fixed_speech_interval'] is False
     assert assistant.status()['activity_items'] == 1
 
 
@@ -70,20 +73,20 @@ def test_analysis_budget_applies_to_noop_and_survives_toggle():
     assistant, clock, planner, captures = fixture()
     planner.result = {'kind': 'none', 'message': ''}
     assistant.set_enabled(True)
-    for _ in range(15):
-        clock.advance(120)
+    for _ in range(65):
+        clock.advance(30)
         asyncio.run(assistant.tick())
-    assert len(captures) == 15 and len(planner.calls) == 12
+    assert len(captures) == 65 and len(planner.calls) == 60
     assert assistant.status()['analysis_budget_exhausted'] is True
     assert assistant.status()['analyses_remaining_this_hour'] == 0
     assistant.set_enabled(False)
     assistant.set_enabled(True)
     clock.advance(120)
     asyncio.run(assistant.tick())
-    assert len(planner.calls) == 12
+    assert len(planner.calls) == 60
     clock.advance(3600)
     asyncio.run(assistant.tick())
-    assert len(planner.calls) == 13
+    assert len(planner.calls) == 61
     assert assistant.status()['analysis_budget_exhausted'] is False
 
 

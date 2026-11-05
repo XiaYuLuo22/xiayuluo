@@ -1,6 +1,6 @@
 # 夏鱼洛 GitHub 一键更新
 
-当前源码0.1.18 / Android versionCode19。点击「GitHub 一键更新」后，App自动从固定GitHub Releases获取签名清单与安装包，不跳转浏览器、不要求本人去GitHub手动下载，也无需另建更新服务器。Windows校验后重启替换，Android交系统确认覆盖安装。
+当前源码0.1.19 / Android versionCode20。点击「GitHub 一键更新」后，App自动从固定GitHub Releases获取签名清单与安装包，不跳转浏览器、不要求本人去GitHub手动下载，也无需另建更新服务器。Windows校验后重启替换，Android交系统确认覆盖安装。
 
 仓库已公开，但目前没有正式签名Release；Windows测试包以成功的Actions构建产物为准，尚无新安卓APK。发布配置仍暂缓，**不绕过校验、不更换原签名**；公开源码、构建产物、正式更新与真机验收不是同一状态。
 
@@ -53,7 +53,7 @@ App内更新遇到已有训练数据时先取得跨进程写锁，建立含datas
 本人私下生成Windows离线包的示例（不上传、不发布、不换密钥）：
 
 ```powershell
-python tools/release.py windows-package --version 0.1.18 --windows Xiayuluo-Windows.zip --notes-file RELEASE_NOTES.md --key-file .release-signing/release-private.pem --output Xiayuluo-0.1.18.xyupdate
+python tools/release.py windows-package --version 0.1.19 --windows Xiayuluo-Windows.zip --notes-file RELEASE_NOTES.md --key-file .release-signing/release-private.pem --output Xiayuluo-0.1.19.xyupdate
 ```
 
 输入须为对应版本构建，输出已存在则拒绝覆盖；包只含签名清单与程序ZIP，不含私钥或用户数据。
@@ -71,4 +71,4 @@ python tools/release.py windows-package --version 0.1.18 --windows Xiayuluo-Wind
 
 0.1.1开始支持签名清单；0.1.3增加下载按钮，当时的浏览器回退已被0.1.11替代；0.1.9增加图形安装器、自动检查与本机离线包；0.1.13增加训练数据保护；0.1.15/0.1.16完善健康确认与云写入屏障。旧“私有仓库/跳网页/逐次批准”说明不覆盖当前行为，版本摘要见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
 
-上一版0.1.17的Windows测试安装包已成功构建；0.1.18的新包以实际Actions结果为准。本轮132项更新相关Python回归、67项手机测试及TypeScript检查通过；回归覆盖签名/篡改、版本/URL/大小/哈希、重定向、解压保护、目录保留、启动失败/回滚、鉴权、更新期间阻止新任务与训练数据保留。尚未用户Windows/Android真机覆盖升级验收，不能保证任意系统/网络/故障状态下更新必定成功。实际Android包记录见 [ANDROID_INSTALL.md](ANDROID_INSTALL.md)，独立构建不等于正式在线发布。
+0.1.18已有132项更新相关Python回归、67项手机测试及TypeScript检查通过；本轮0.1.19的验证和Windows测试包以实际结果为准。既有回归覆盖签名/篡改、版本/URL/大小/哈希、重定向、解压保护、目录保留、启动失败/回滚、鉴权、更新期间阻止新任务与训练数据保留。尚未用户Windows/Android真机覆盖升级验收，不能保证任意系统/网络/故障状态下更新必定成功。实际Android包记录见 [ANDROID_INSTALL.md](ANDROID_INSTALL.md)，独立构建不等于正式在线发布。

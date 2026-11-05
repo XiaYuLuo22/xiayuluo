@@ -7,6 +7,7 @@ import { CloudHTTPClient, CloudSyncEngine, CloudSyncError, type CloudState } fro
 import { CloudStorageError, DurableCloudStore, MAX_CLOUD_STATE_BYTES, scopeForCloud,
   validateCloudConnection, type CloudConnection, type CloudFileAdapter } from './cloudStorage';
 import { cloudRows, cloudTaskView, verifiedPhoneDevice } from './cloudWorkspace';
+import { SettingsDetails } from './SettingsDetails';
 
 const connectionKey = 'xiayuluo.cloud.connection.v1';
 const empty: CloudState = { schema: 1, cursor: 0, records: [], outbox: [], tasks: [] };
@@ -228,13 +229,17 @@ export function CloudPanel({ initialWorkspaceId = '', onActivate }: { initialWor
   const sessionRows = cloudRows(state, 'session').reverse(), messages = cloudRows(state, 'message').filter(item => item.payload.session_id === selected);
   const conflicts = state.outbox.filter(item => item.conflict);
   return <View style={s.card}>
-    <Text style={s.heading}>连接方式与独立云工作区</Text>
-    <Text style={s.hint}>原聊天/语音仍使用电脑直连。下方云面板独立保存文本与任务，不读取屏幕或控制鼠标；云语音暂不可用，选择云时暂停已有直连语音，不自动重开。</Text>
+    <Text style={s.heading}>独立云工作区 · 高级</Text>
+    <Text style={s.hint}>当前选择：{active ? '独立云工作区' : '电脑直连'}。云服务需要另行配置。</Text>
     <View style={s.row}><Button text="电脑直连（原聊天）" action={() => { setActive(false); activeRef.current = false; ++generation.current; inform('云面板已暂停，原聊天页仍使用已配对电脑；直连语音可手动重新开启。'); }} />
       <Button text="独立云工作区" disabled={!ready || busy || Platform.OS === 'web'} action={() => { onActivate?.(); setActive(true); }} /></View>
-    <Text style={s.hint}>云服务尚需自行部署，公开 GitHub 不是此服务。只有显式连接且进入云工作区才同步，前台约15秒一轮，后台不保证运行。</Text>
     <Text accessibilityLiveRegion="polite" style={s.notice}>{notice}{lastSync ? ` 上次成功同步：${lastSync}` : ''}</Text>
+    <SettingsDetails title="云模式、隐私与部署说明">
+      <Text style={s.hint}>原聊天/语音仍使用电脑直连。下方云面板独立保存文本与任务，不读取屏幕或控制鼠标；云语音暂不可用，选择云时暂停已有直连语音，不自动重开。</Text>
+      <Text style={s.hint}>云服务尚需自行部署，公开 GitHub 不是此服务。只有显式连接且进入云工作区才同步，前台约15秒一轮，后台不保证运行。</Text>
+    </SettingsDetails>
     {active && <>
+      <SettingsDetails title="云连接配置与凭据">
       <Text style={s.label}>云连接配置（手机设备专用凭据）</Text>
       <TextInput style={s.input} value={origin} onChangeText={setOrigin} placeholder="https://独立云服务域名" autoCapitalize="none" autoCorrect={false} maxLength={512} accessibilityLabel="独立云服务地址" />
       <TextInput style={s.input} value={deviceId} onChangeText={setDeviceId} placeholder="手机设备编号，可留空由服务核实" autoCapitalize="none" autoCorrect={false} maxLength={128} accessibilityLabel="云手机设备编号" />
@@ -242,6 +247,9 @@ export function CloudPanel({ initialWorkspaceId = '', onActivate }: { initialWor
       <Button text={busy ? '正在处理…' : '校验并安全保存云连接'} disabled={busy || !ready || !origin.trim()} action={() => void configure()} />
       {connection && <><Text selectable style={s.hint}>已保存：{connection.origin} · {connection.deviceId}。凭据只在系统安全存储；不同服务/设备的离线档案隔离，换账号不会删除旧库。</Text>
         <Button text="暂停并移除本机云凭据（保留离线档案）" disabled={busy} action={() => void forget()} />
+      </>}
+      </SettingsDetails>
+      {connection && <>
         <Button text="立即同步并刷新任务状态" disabled={busy} action={() => void sync()} />
         <Text style={s.hint}>本机待发送 {state.outbox.length} 条 · 任务 {state.tasks.length} 个 · 冲突 {conflicts.length} 条。单份档案最多2MiB；超过上限停止保存，不会清空旧档案。</Text>
         {!!conflicts.length && <View><Text style={s.label}>冲突保留，未自动覆盖</Text>{conflicts.slice(0, 5).map(item => <Text selectable key={item.event_id} style={s.hint}>{item.entity}：{JSON.stringify(item.payload).slice(0, 600)}</Text>)}</View>}

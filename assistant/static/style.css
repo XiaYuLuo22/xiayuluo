@@ -241,6 +241,17 @@ kbd { font-size: 8px; margin-left: auto; border: 1px solid #354557; border-radiu
 .connection-row small { display: block; color: #7b97ab; font-size: 10px; line-height: 1.8; margin-top: 6px; overflow-wrap: anywhere; }
 .settings-card { background: var(--panel); border: 1px solid var(--line); padding: 21px; border-radius: 6px; margin-bottom: 15px; }
 .settings-card summary { font-size: 12px; cursor: pointer; color: #a6bdcc; }
+.settings-card summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; border-radius: 3px; }
+.settings-card > summary { padding: 3px 0; font-weight: 500; }
+.settings-details { margin-top: 15px; border-top: 1px solid var(--line); padding-top: 12px; min-width: 0; }
+.settings-details > summary { line-height: 1.7; }
+.settings-details[open] > summary { margin-bottom: 12px; }
+.settings-details > label { display: block; margin-top: 14px; font-size: 11px; line-height: 1.8; color: var(--ink); }
+.preference-card > div { min-width: 0; flex: 1; }
+.preference-card > .switch { align-self: flex-start; }
+#view-settings > .settings-card > button { margin-top: 10px; }
+#view-settings > .page-heading { margin-bottom: 22px; }
+#view-settings select { max-width: 100%; }
 .settings-card p { font-size: 11px; line-height: 1.9; color: #829eaf; margin-top: 12px; }
 .settings-card pre { background: #0d151e; border: 1px solid #263846; padding: 14px; margin: 16px 0; border-radius: 4px; font: 10px/1.9 var(--mono); color: #8eb6be; max-height: 420px; overflow: auto; }
 .settings-card code { font-size: 10px; padding: 2px 4px; border-radius: 3px; color: #a8c7cd; background: #1c2c38; }

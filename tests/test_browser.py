@@ -605,7 +605,7 @@ def test_browser_first_use_connection_hint(page):
     page.locator('#connection-hint').click()
     playwright_api.expect(page.locator('#view-settings')).to_be_visible()
     playwright_api.expect(page.locator('#settings-status')).to_contain_text('尚未连接')
-    page.locator('#view-settings details:not(.developer-only) summary').click()
+    page.locator('#connection-config-details > summary').click()
     playwright_api.expect(page.locator('#view-settings pre').last).to_contain_text('OPENAI_API_KEY=')
 
 
@@ -825,6 +825,7 @@ def test_private_native_import_button_reports_real_outcome_without_client_paths(
     page.locator('[data-view="settings"]').click()
     playwright_api.expect(page.locator('#import-update')).to_be_enabled()
     playwright_api.expect(page.locator('#check-update')).to_be_enabled()
+    page.locator('#update-details > summary').click()
     page.locator('#import-update').click()
     expected = {'cancel': '已取消', 'error': '签名无效', 'restart': '正在重启更新'}[outcome]
     playwright_api.expect(page.locator('#update-status')).to_contain_text(expected)
@@ -958,6 +959,7 @@ def stub_proactive(page):
     page.route('**/api/greeting', lambda route: route.fulfill(json={'greeting': None, 'pending': False}))
     page.reload()
     playwright_api.expect(page.locator('#proactive-control')).to_have_text('主动建议：关')
+    playwright_api.expect(page.locator('#model-status')).to_contain_text('已配置')
     return control, calls, polls, items
 
 
@@ -969,8 +971,8 @@ def test_browser_proactive_is_opt_in_independent_and_explains_privacy(page, brow
     page.locator('#proactive-control').click()
     playwright_api.expect(page.locator('#proactive-control')).to_have_attribute('aria-pressed', 'true')
     playwright_api.expect(page.locator('#mouse-control')).to_have_attribute('aria-pressed', 'false')
-    playwright_api.expect(page.locator('#proactive-note')).to_contain_text('30%')
-    playwright_api.expect(page.locator('#proactive-note')).to_contain_text('每小时最多 3 次')
+    playwright_api.expect(page.locator('#proactive-note')).to_contain_text('不按固定时间发言')
+    playwright_api.expect(page.locator('#proactive-note')).to_contain_text('你的输入和停止优先')
     assert calls == [{'enabled': True, 'provider': 'auto'}]
     page.locator('[data-view="settings"]').click()
     playwright_api.expect(page.locator('#proactive-setting')).to_be_checked()
@@ -1013,6 +1015,53 @@ def test_browser_proactive_notices_are_bounded_plain_text_and_not_saved_or_spoke
     page.locator('#proactive-control').click()
     playwright_api.expect(page.locator('.proactive-notice')).to_have_count(0)
     assert not control['enabled']
+
+
+def test_browser_proactive_comment_is_plain_text_and_not_replayed(page):
+    control, calls, polls, items = stub_proactive(page)
+    page.locator('#proactive-control').click()
+    playwright_api.expect(page.locator('#proactive-control')).to_have_attribute('aria-pressed', 'true')
+    items.append({'id': 1, 'kind': 'comment', 'message': '这个思路挺有意思。<script>ignored</script>',
+                  'generation': control['generation']})
+    control['cursor'] = 1
+    page.evaluate('pollProactive()')
+    playwright_api.expect(page.locator('.proactive-notice')).to_have_count(1)
+    playwright_api.expect(page.locator('.assistant-notice-heading').last).to_contain_text('随口聊聊')
+    assert page.locator('.proactive-notice script').count() == 0
+    page.evaluate('pollProactive()')
+    playwright_api.expect(page.locator('.proactive-notice')).to_have_count(1)
+
+
+def test_proactive_enable_includes_only_existing_session_id_not_conversation_text(page):
+    control, calls, polls, items = stub_proactive(page)
+    page.evaluate("state.session = 'current-session-fixture'")
+    page.locator('#proactive-control').click()
+    playwright_api.expect(page.locator('#proactive-control')).to_have_attribute('aria-pressed', 'true')
+    assert calls == [{'enabled': True, 'provider': 'auto', 'session_id': 'current-session-fixture'}]
+    page.locator('#proactive-control').click()
+    playwright_api.expect(page.locator('#proactive-control')).to_have_attribute('aria-pressed', 'false')
+    assert calls[-1] == {'enabled': False}
+
+
+def test_new_conversation_revokes_old_proactive_opportunity_even_without_tts(page):
+    control, calls, polls, items = stub_proactive(page)
+    interrupted = []
+    def interrupt(route):
+        interrupted.append(route.request.post_data_json)
+        control['generation'] += 1
+        items.clear()
+        route.fulfill(json={key: value for key, value in control.items() if key != 'fail'})
+    page.route('**/api/proactive/interrupt', interrupt)
+    page.evaluate("state.status.runtime.presentation = 'desktop'")
+    page.locator('#proactive-control').click()
+    playwright_api.expect(page.locator('#proactive-control')).to_have_attribute('aria-pressed', 'true')
+    page.evaluate("transientNotice('comment', '旧会话的一句接话', 1)")
+    playwright_api.expect(page.locator('.proactive-notice')).to_have_count(1)
+    page.locator('#new-chat').click()
+    playwright_api.expect(page.locator('.proactive-notice')).to_have_count(0)
+    assert interrupted == [{}]
+    assert control['enabled'] is True
+    assert calls == [{'enabled': True, 'provider': 'auto'}]
 
 
 def test_browser_proactive_toggle_failure_never_fakes_revocation(page):

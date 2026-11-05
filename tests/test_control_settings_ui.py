@@ -1,9 +1,74 @@
 """Native control settings are explicit, local, and honest about shadow mode."""
+import time
+
 from test_browser import browser_app, page, playwright_api  # noqa: F401
 
 
 def desktop(page):
     page.evaluate("state.status.runtime.presentation = 'desktop'")
+
+
+def test_settings_details_start_collapsed_and_stops_remain_visible(page):
+    writes = []
+    page.on('request', lambda request: writes.append(request.url)
+            if request.method == 'POST' and any(part in request.url for part in
+                ('/api/autonomy', '/api/visual-loop', '/api/speech', '/api/proactive', '/api/updates')) else None)
+    page.locator('[data-view="settings"]').click()
+    sections = ('connection-help', 'connection-status-details', 'speech-profile-details',
+                'autonomy-goal-details', 'visual-loop-details', 'proactive-details',
+                'voice-help', 'update-details', 'connection-config-details')
+    for section in sections:
+        assert not page.locator('#' + section).evaluate('(node) => node.open')
+    for control in ('chat-provider', 'approval-mode', 'reply-speech-setting', 'proactive-setting',
+                    'voice-stop', 'speech-profile-stop', 'autonomy-stop', 'visual-loop-stop', 'download-update'):
+        playwright_api.expect(page.locator('#' + control)).to_be_visible()
+    playwright_api.expect(page.locator('#speech-rate')).to_be_hidden()
+    playwright_api.expect(page.locator('#autonomy-goal')).to_be_hidden()
+    playwright_api.expect(page.locator('#visual-loop-frequency')).to_be_hidden()
+
+    summary = page.locator('#autonomy-goal-details > summary')
+    summary.focus()
+    page.keyboard.press('Enter')
+    playwright_api.expect(page.locator('#autonomy-goal')).to_be_visible()
+    page.keyboard.press('Space')
+    playwright_api.expect(page.locator('#autonomy-goal')).to_be_hidden()
+    playwright_api.expect(page.locator('#autonomy-stop')).to_be_visible()
+    page.set_viewport_size({'width': 390, 'height': 844})
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    assert writes == []
+
+
+def test_native_typing_hint_is_boolean_throttled_and_stops_when_idle(page):
+    calls, times = [], []
+    def interaction(route):
+        calls.append(route.request.post_data_json)
+        times.append(time.monotonic())
+        route.fulfill(json={'accepted': True})
+    page.route('**/api/interaction', interaction)
+    desktop(page)
+    page.locator('#prompt').fill('私人内容不会进入互动提示')
+    page.wait_for_function('() => typingHintPending === false')
+    page.locator('#prompt').fill('私人内容仍只在输入框')
+    assert calls == [{'typing': True}]
+    page.wait_for_function('() => typingHintSent === false')
+    page.wait_for_function('() => typingHintPending === false')
+    assert calls[-1] == {'typing': False}
+    assert 1 <= len(calls) - 1 <= 2
+    assert all(call == {'typing': True} for call in calls[:-1])
+    if len(calls) == 3:
+        assert times[1] - times[0] >= .9
+    assert all(set(call) == {'typing'} for call in calls)
+
+
+def test_non_native_and_phone_typing_never_send_interaction_hints(page):
+    calls = []
+    page.route('**/api/interaction', lambda route: (calls.append(route.request.post_data_json), route.fulfill(json={})))
+    page.locator('#prompt').fill('浏览器输入')
+    desktop(page)
+    page.evaluate("history.replaceState(null, '', '/mobile/chat')")
+    page.locator('#prompt').fill('手机输入')
+    page.locator('#prompt').blur()
+    assert calls == []
 
 
 def test_new_controls_are_read_only_when_not_native_and_never_start_on_open(page):
@@ -46,6 +111,7 @@ def test_voice_profile_is_explicit_and_uses_plain_local_names(page):
     page.evaluate('refreshSpeech()')
     page.locator('[data-view="settings"]').click()
     assert calls == []
+    page.locator('#speech-profile-details > summary').click()
     page.locator('#speech-voices-refresh').click()
     playwright_api.expect(page.locator('#speech-voice option')).to_have_count(2)
     page.locator('#speech-voice').select_option('zh-b')
@@ -83,6 +149,7 @@ def test_autonomy_goal_and_decision_only_happen_on_explicit_actions(page):
     page.locator('[data-view="settings"]').click()
     assert calls == []
     page.locator('#autonomy-enabled').check()
+    page.locator('#autonomy-goal-details > summary').click()
     playwright_api.expect(page.locator('#autonomy-goal-save')).to_be_enabled()
     page.locator('#autonomy-goal').fill('帮我整理保存步骤')
     page.locator('#autonomy-criteria').fill('能说明需要核实的结果')
@@ -120,6 +187,7 @@ def test_visual_shadow_reports_actual_fields_and_stop_invalidates_late_start(pag
     page.route('**/api/autonomy/stop', lambda route: route.fulfill(json={'available': True, 'enabled': False}))
     desktop(page)
     page.locator('[data-view="settings"]').click()
+    page.locator('#visual-loop-details > summary').click()
     playwright_api.expect(page.locator('#visual-loop-goal')).to_have_attribute('maxlength', '128')
     playwright_api.expect(page.locator('#visual-loop-card')).to_contain_text('3秒准备时间')
     page.locator('#visual-loop-goal').fill('检查屏幕变化')

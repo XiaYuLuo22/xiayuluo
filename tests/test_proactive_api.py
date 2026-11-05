@@ -24,8 +24,10 @@ def test_observation_off_by_default_and_unavailable_in_headless(client_factory):
     client, records = client_factory()
     state = client.get('/api/proactive').json()
     assert not state['enabled'] and not state['available']
-    assert state['max_analyses_per_hour'] == 12
-    assert state['max_notices_per_hour'] == 3
+    assert state['max_analyses_per_hour'] == 60
+    assert state['max_notices_per_hour'] == 60
+    assert state['cadence'] == 'event-driven'
+    assert state['fixed_speech_interval'] is False
     assert state['all_activity_visible'] is False
     assert client.post('/api/proactive', json={'enabled': True}).status_code == 409
     assert client.get('/api/proactive/events').json()['events'] == []
