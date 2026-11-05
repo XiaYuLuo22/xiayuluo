@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from assistant.config import Settings
-from assistant.proactive import (CONVERSATION_PROMPT, ObservationSkipped, SuggestionPlanner,
+from assistant.proactive import (ActivityObservation, CONVERSATION_PROMPT, ObservationSkipped, SuggestionPlanner,
                                  _ConversationCodex)
 from conftest import model_stream
 from test_proactive import fixture
@@ -14,6 +14,15 @@ from test_proactive import fixture
 
 DIALOGUE = [{'role': 'user', 'content': '我今天想把这个项目整理清楚。'},
             {'role': 'assistant', 'content': '可以先把当前功能和待办分开列出来。'}]
+
+
+def test_codex_observation_schema_requires_all_fields_without_changing_legacy_parser_defaults():
+    schema = ActivityObservation.output_schema()
+    assert schema['additionalProperties'] is False
+    assert set(schema['required']) == set(schema['properties']) == {'kind', 'message', 'category', 'activity'}
+    assert all('default' not in field for field in schema['properties'].values())
+    legacy = ActivityObservation.model_validate({'kind': 'comment', 'message': '一句短话。'})
+    assert legacy.category == 'unknown' and legacy.activity == ''
 
 
 def install_conversation_planner(assistant, planner, result=None):
